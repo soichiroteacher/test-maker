@@ -1,0 +1,13 @@
+# 自動ルビの辞書(約24MB の生成物)。tools/build-ruby-engine.js で作り直せるので GitHub には上げない
+ruby-engine.js
+
+# バックアップ・出力したファイルを公開リポジトリに上げないため
+*.json
+*.csv
+*.docx
+*.pdf
+*.xlsx
+*.xls
+
+# 開発用の設定
+.claude/

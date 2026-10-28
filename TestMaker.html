@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>テスト問題メーカー</title>
+<!--
+=====================================================================
+ テスト問題メーカー  ／  引き継ぎメモ（担当者が変わった場合はここから読む）
+=====================================================================
+ ■ これは何か
+   マークシート式の定期テストの「問題用紙」を作るアプリ。
+   空欄番号・選択肢の記号(ア〜)・正答一覧・体裁を自動で整え、
+   画面プレビュー / 印刷(PDF) / Word(.docx) / 正答CSV を出力する。
+
+ ■ 動かし方
+   このHTMLファイルをChromeかEdgeで開くだけ。インターネット不要・インストール不要。
+   外部ライブラリ・外部通信は一切使っていない（10年後も動くことを優先）。
+
+ ■ データの置き場所
+   1) 自動保存: ブラウザ内(localStorage キー "testmaker:v1")。10分ごとに履歴も残る。
+   2) 本当のバックアップ: 画面上部「バックアップ保存」で出るJSONファイル。
+      → 学期ごと・大きく編集した後に必ず保存し、Googleドライブ等に置く。
+      ※ ブラウザの履歴削除や、HTMLの置き場所の変更で自動保存は消えることがある。
+
+ ■ コードの構成（この順に並んでいる。直す場所の目安）
+   1. 定数・初期データ      … 記号セット、フォント、サンプルテスト(sampleExam)
+   2. データ(JSON)の形      … newExam / newSection / migrate（形を変えたら SCHEMA を上げる）
+   3. compile(exam)         … ★中心。入力データ → 番号・記号・正答・警告を計算
+   4. 出力: HTML / 正答 / CSV / Word … すべて compile の結果だけを見て作る
+      (体裁を変えたい → renderPaperHTML と buildDocx を直す)
+   5. 保存(storage)・バックアップ・履歴
+   6. 画面(editor)         … 入力フォーム。ここは見た目だけ。計算はしない
+   ★ 自動ルビ: rubySegs()（優先順 手書き→登録辞書→自動）。辞書エンジンは別ファイル ruby-engine.js（無くても他は動く）
+   ★ 新しい問題の種類を足すとき: newSection / compile / 各render / editor に1つずつ足す。
+
+ ■ 空欄の書き方（本文の中で）
+   {{語句}}   … 空欄にする。語句が正解になり、語群に自動で入る。番号は自動。
+   {{@語句}}  … 同じ大問内で先に出た「語句」の空欄と同じ番号で再登場させる。
+=====================================================================
+-->
+<style>
+:root{
+  --bg:#f3f5f7; --panel:#fff; --line:#d5dbe1; --ink:#1f2933; --sub:#5b6773;
+  --accent:#1f6feb; --accent-d:#1858bd; --warn:#b45309; --warn-bg:#fff4e0; --danger:#c62828; --ok:#1b7a3d;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"BIZ UDPGothic","BIZ UDPゴシック","Yu Gothic UI","Meiryo","Hiragino Sans",sans-serif;font-size:15px;line-height:1.5}
+button,input,select,textarea{font:inherit;color:inherit}
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ---- top bar ---- */
+.top{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.top h1{font-size:17px;margin:0 6px 0 0;white-space:nowrap}
+.grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.grp.sep{padding-left:14px;border-left:1px solid var(--line)}
+.spacer{flex:1}
+.btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#eef3fb;border-color:#b9c7dc}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700}
+.btn.primary:hover{background:var(--accent-d)}
+.btn.small{padding:2px 8px;font-size:13px;border-radius:6px}
+.btn.danger{color:var(--danger)}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #9cc2ff;outline-offset:1px}
+select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-weight:700}
+.status{font-size:13px;color:var(--sub)}
+.badge-bk{font-size:13px;padding:3px 10px;border-radius:99px;background:#e6f4ea;color:var(--ok);cursor:pointer;border:0}
+.badge-bk.dirty{background:var(--warn-bg);color:var(--warn);font-weight:700}
+
+/* ---- main ---- */
+.main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(380px,44%) 1fr;gap:12px;padding:12px}
+.col{min-height:0;display:flex;flex-direction:column}
+.editor{overflow:auto;padding-right:4px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:15px}
+.field{display:block;margin:8px 0}
+.field>span{display:block;font-size:12.5px;color:var(--sub);margin-bottom:2px}
+.field input[type=text],.field input[type=number],.field textarea,.field select,input.grow,textarea.grow{
+  width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff}
+.field textarea{resize:vertical;line-height:1.6}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row.nowrap{flex-wrap:nowrap}
+.row>.field{flex:1;min-width:120px}
+.hint{font-size:12.5px;color:var(--sub);margin:2px 0 6px}
+details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
+.sc-head{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.sc-head input.grow{flex:1;min-width:160px;font-weight:700}
+.badge{background:#1f2933;color:#fff;border-radius:6px;padding:2px 9px;font-weight:700;white-space:nowrap}
+.tag{font-size:12px;background:#e8eef7;color:#264b87;border-radius:6px;padding:2px 8px;white-space:nowrap}
+.sub{background:#f8fafc;border:1px solid #e3e8ee;border-radius:10px;padding:8px 10px;margin:8px 0}
+.sub .qhead{display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.qno{font-weight:700;color:#264b87}
+.copt{display:flex;gap:6px;align-items:center;margin:3px 0}
+.copt .lab{width:1.8em;text-align:center;font-weight:700}
+.copt input[type=text]{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.blankmap{font-size:13px;color:var(--sub);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin-top:6px;line-height:1.7}
+.blankmap b{color:var(--ink)}
+.addbar{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 40px}
+
+/* ---- preview ---- */
+.preview{overflow:auto;background:#cfd6de;border-radius:12px;padding:12px;position:relative}
+.ptabs{display:flex;gap:6px;align-items:center;margin-bottom:8px;position:sticky;top:-12px;z-index:3;background:#cfd6de;padding:6px 0}
+.ptab{border:1px solid #9aa7b5;background:#fff;border-radius:99px;padding:4px 14px;cursor:pointer}
+.ptab.on{background:#1f2933;color:#fff;border-color:#1f2933}
+.warns{background:var(--warn-bg);border:1px solid #f0cf94;color:#6b3f06;border-radius:10px;padding:8px 12px;margin-bottom:10px;font-size:13.5px}
+.warns.ok{background:#e6f4ea;border-color:#b6dfc2;color:#14532d}
+.warns ul{margin:4px 0 0;padding-left:1.2em}
+
+/* ---- the paper (screen + print) ---- */
+.sheet{background:#fff;width:210mm;padding:14mm;margin:0 auto;box-shadow:0 2px 10px rgba(0,0,0,.25);color:#000;
+  font-size:var(--fs,11pt);line-height:1.75;transform-origin:top center}
+.sheet *{box-sizing:border-box}
+.p-date{text-align:right;font-size:9pt}
+.p-title{text-align:center;font-weight:700;font-size:1.3em;margin:2mm 0 0;line-height:1.4}
+.p-kind{text-align:center;font-weight:700;font-size:1.9em;letter-spacing:.35em;margin:0 0 3mm;line-height:1.3}
+.p-name{display:flex;justify-content:flex-end;align-items:flex-end;gap:2mm;margin:0 0 4mm;font-size:1em}
+.p-name .ln{display:inline-block;border-bottom:1px solid #000;min-width:12mm;height:1.6em}
+.p-name .ln.w{min-width:40mm}
+.p-notice{border:1.5px solid #000;border-radius:3px;padding:2mm 4mm;margin:0 0 3mm;font-weight:700;font-size:.95em;line-height:1.6}
+.p-notice div{padding-left:1.2em;text-indent:-1.2em}
+.p-intro{margin:0 0 3mm;text-indent:1em}
+.sec{margin-top:5mm}
+.para.last{break-after:avoid}
+@media print{.sec.pb{break-before:page;margin-top:0}}
+.sec h2{display:flex;align-items:center;gap:3mm;margin:0 0 2mm;padding-bottom:1mm;border-bottom:2px solid #000;font-size:1.15em;line-height:1.5;break-after:avoid}
+.sec h2 .no{background:#000;color:#fff;border-radius:2px;min-width:1.7em;text-align:center;padding:0 .25em;font-weight:700}
+.sec h2 small{font-weight:400;font-size:.85em;margin-left:auto;white-space:nowrap}
+.lead{margin:0 0 1.5mm;text-indent:1em}
+.note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em}
+.para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:1.95;orphans:2;widows:2}
+.blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .1em;white-space:nowrap}
+.bank{border:1.5px solid #000;margin:2mm 0 1mm;break-inside:avoid}
+.bank-h{border-bottom:1.5px solid #000;padding:.2mm 3mm;font-size:.95em}
+.bank-h span{margin-left:1em;font-size:.9em}
+.bank-g{display:grid;padding:1mm 2mm}
+.bank-g div{padding:.5mm 1mm;line-height:1.6}
+.lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
+.q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
+.q-t{text-indent:-3.9em;line-height:1.7}
+.q-t .qn{display:inline-block;width:3.9em;white-space:nowrap;text-indent:0;font-weight:700}
+.q-c{display:grid;margin-top:.5mm}
+.q-c div{line-height:1.6;padding-right:2mm}
+.ansbox{border:1px solid #000;margin:1mm 0 0;background:#fff}
+.sheet .pt{font-size:.85em;margin-left:.5em}
+.sheet ruby rt{font-size:.55em;font-weight:400;line-height:1}
+.sheet.ruby-on{line-height:2.2}
+.ruby-on .para{line-height:2.35}
+.ruby-on .p-title{line-height:2.1}
+.ruby-on .p-kind{line-height:1.9}
+.ruby-on .q-t,.ruby-on .q-c div,.ruby-on .bank-g div,.ruby-on .lead,.ruby-on .note,.ruby-on .p-notice{line-height:2.1}
+.edtool{position:sticky;top:0;z-index:2;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:2px 0 8px}
+.p-end{margin-top:6mm;text-align:center;font-size:.9em}
+/* answer key */
+.k-title{text-align:center;font-weight:700;font-size:1.5em;margin-bottom:1mm}
+.k-sub{text-align:center;margin-bottom:4mm;font-size:.95em}
+.k-sec{break-inside:avoid;margin-bottom:4mm}
+.k-sec h2{font-size:1em;margin:0 0 1mm;border-bottom:1.5px solid #000}
+.k-grid{columns:2;column-gap:8mm}
+.k-row{display:flex;gap:3mm;border-bottom:1px dotted #000;padding:.3mm 0;line-height:1.6;break-inside:avoid}
+.k-row .n{width:3em;font-weight:700;text-align:right}
+.k-row .a{width:2.2em;font-weight:700;text-align:center}
+.k-row .t{flex:1}
+.k-row .p{width:3em;text-align:right}
+
+/* ---- dialogs / toast ---- */
+dialog{border:0;border-radius:14px;padding:0;max-width:min(760px,94vw);width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.dlg{padding:18px 22px;max-height:80vh;overflow:auto}
+.dlg h2{margin:0 0 8px;font-size:18px}
+.dlg h4{margin:14px 0 4px}
+.dlg code{background:#eef2f6;padding:1px 5px;border-radius:4px}
+.dlg ul{margin:4px 0;padding-left:1.3em}
+.hist{width:100%;border-collapse:collapse;font-size:14px}
+.hist td,.hist th{border-bottom:1px solid var(--line);padding:5px 6px;text-align:left}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#1f2933;color:#fff;padding:9px 18px;border-radius:99px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .25s;z-index:99}
+#toast.on{opacity:1}
+
+@media (max-width:1000px){
+  .app{height:auto}.main{grid-template-columns:1fr}.editor{max-height:none}
+}
+/* ---- print: show only the sheet ---- */
+@media print{
+  html,body{height:auto;background:#fff}
+  .app,#toast,dialog{display:none!important}
+  #printRoot{display:block!important}
+  #printRoot .sheet{zoom:1!important;width:auto;padding:0;margin:0;box-shadow:none}
+}
+#printRoot{display:none}
+.pfoot{display:none}
+@media print{.pfoot{display:block}}
+</style>
+<style>
+/* 印刷：@page の余白を0にするとブラウザが付ける日時・URLの欄が出なくなる。
+   代わりに表の thead/tfoot（毎ページ繰り返される）で上下の余白を作る */
+@page{size:A4;margin:0}
+@media print{
+  .pt{width:100%;border-collapse:collapse}
+  .pt td{padding:0}
+  .pt thead td{height:13mm}
+  .pt tfoot td{height:15mm}
+  .pfoot{position:fixed;left:14mm;right:14mm;bottom:5mm;font-size:8pt;line-height:1.3;color:#000}
+  #printRoot .sheet{padding:0 14mm!important}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>テスト問題メーカー</h1>
+    <div class="grp">
+      <select id="examSel" class="examsel" title="作成中のテストを切り替え"></select>
+      <button class="btn" id="bNew">新規</button>
+      <button class="btn" id="bDup" title="今のテストをコピーして新しいテストを作る（次の学期はここから）">複製</button>
+      <button class="btn" id="bRen">名前変更</button>
+      <button class="btn danger" id="bDel">削除</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="grp">
+      <span class="status" id="saveStat"></span>
+      <button class="badge-bk" id="bkBadge" title="クリックでバックアップ保存"></button>
+      <button class="btn" id="bBackup">バックアップ保存</button>
+      <button class="btn" id="bLoad">読み込み</button>
+      <button class="btn" id="bHist">履歴</button>
+      <button class="btn" id="bHelp">使い方・引き継ぎ</button>
+    </div>
+    <div class="grp sep">
+      <button class="btn primary" id="bWord">Word出力</button>
+      <button class="btn primary" id="bPrint">印刷／PDF</button>
+      <button class="btn" id="bCsv">正答CSV</button>
+      <button class="btn" id="bKeyJson" title="採点アプリに渡すための正答ファイル(JSON)">採点用JSON</button>
+    </div>
+  </header>
+  <div class="main">
+    <section class="col"><div class="editor" id="editor"></div></section>
+    <section class="col">
+      <div class="preview" id="preview">
+        <div class="ptabs">
+          <button class="ptab on" data-tab="paper">問題用紙</button>
+          <button class="ptab" data-tab="key">正答一覧</button>
+          <span class="status" id="countStat" style="margin-left:8px"></span>
+        </div>
+        <div id="warns"></div>
+        <div id="sheetHost"></div>
+      </div>
+    </section>
+  </div>
+</div>
+<div id="printRoot"></div>
+<div id="toast"></div>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+
+<dialog id="dlgHist"><div class="dlg"><h2>履歴（自動の保存点）</h2>
+  <p class="hint">10分以上あけて編集するたびに自動で残ります（最大40件）。「復元」は<b>新しいテストとして</b>取り出すので、今のテストは上書きされません。</p>
+  <div id="histBody"></div><div style="text-align:right;margin-top:10px"><button class="btn" onclick="this.closest('dialog').close()">閉じる</button></div></div></dialog>
+
+<dialog id="dlgRuby"></dialog>
+<input type="file" id="dictIn" accept=".json,application/json" hidden>
+<dialog id="dlgHelp"><div class="dlg" id="helpBody"></div></dialog>
+
+<script>
+'use strict';
+/* =====================================================================
+   1. 定数・初期データ
+   ===================================================================== */
+const SCHEMA = 1;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const LS_KEY = 'testmaker:v1';
+const LABEL_SETS = {
+  kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
+  maru: ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'],
+  abc : 'ABCDEFGHIJKLMNOPQRST'.split('')
+};
+const LABEL_NAMES = { kana:'ア・イ・ウ…（カタカナ）', maru:'①・②・③…', abc:'A・B・C…' };
+const FONTS = [
+  ['BIZ UDPゴシック','"BIZ UDPGothic","BIZ UDPゴシック","Yu Gothic","Meiryo",sans-serif'],
+  ['UD デジタル 教科書体 NP-R','"UD Digital Kyokasho NP-R","UD デジタル 教科書体 NP-R","UD デジタル 教科書体 N-R","HG教科書体","Yu Mincho",serif'],
+  ['HG教科書体','"HGKyokashotai","HG教科書体","HGP教科書体","UD デジタル 教科書体 NP-R","Yu Mincho",serif'],
+  ['BIZ UDP明朝','"BIZ UDPMincho","BIZ UDP明朝","Yu Mincho","MS PMincho",serif'],
+  ['游ゴシック','"Yu Gothic","游ゴシック","Meiryo",sans-serif'],
+  ['游明朝','"Yu Mincho","游明朝","MS PMincho",serif'],
+  ['MS ゴシック','"MS Gothic","MS ゴシック",monospace'],
+  ['MS 明朝','"MS Mincho","MS 明朝",serif'],
+];
+const TYPE_NAMES = { blank:'語群選択（空欄補充）', choice:'選択問題（問ごとの選択肢）', tf:'正誤問題', written:'記述問題' };
+
+/* ---- ユーティリティ ---- */
+const $  = (s, r=document) => r.querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const zen = n => String(n).replace(/\d/g, d => String.fromCharCode(d.charCodeAt(0) + 0xFEE0));
+const num = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+const clone = o => JSON.parse(JSON.stringify(o));
+const pad2 = n => String(n).padStart(2,'0');
+const stamp = (t=Date.now()) => { const d=new Date(t); return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`; };
+const fmtTime = t => { const d=new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const vlen = s => { let n=0; for (const ch of plain(s)) n += /[\x20-\x7e]/.test(ch) ? 0.55 : 1; return n; };
+const hash32 = str => { let h=2166136261; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; };
+/* ルビ記法：[漢字|かんじ]。ルビ表示OFFのときは漢字だけを出す */
+const RUBY_RE = /\[([^\[\]|]+)\|([^\[\]|]*)\]/g;
+const plain = s => String(s).replace(RUBY_RE, '$1');
+let RUBY = false;                                   // ルビを出力するか（出力時に meta.showRuby を入れる）
+let AUTO = false;                                   // 自動ルビを使うか
+let RUBY_LOG = null;                                // 確認ダイアログ用：出てきた語を集める
+const KANJI_RE = /[㐀-䶿一-鿿々〆]/;
+const hira = s => String(s).replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60));
+const AUTO_CACHE = new Map();
+const BUILTIN_DICT = { '令': 'れい', '語': 'ご' };   // 自動の読みが誤りやすい語の標準辞書（登録辞書が優先される）。足したいときはここへ
+
+/* ルビの決め方（優先順）: ①手で書いた [漢字|よみ]  ②登録辞書(store.userDict)  ③自動(kuromoji)
+   結果は [{t:文字, r:よみ|null}] の並び。HTML・Wordの両方がこれを使う */
+function rubySegs(s) {
+  s = String(s); const out = []; let pos = 0, m; RUBY_RE.lastIndex = 0;
+  const pushAuto = t => { if (!t) return; if (AUTO && KANJI_RE.test(t)) out.push(...autoSegs(t)); else out.push({ t, r: null }); };
+  while ((m = RUBY_RE.exec(s))) { pushAuto(s.slice(pos, m.index)); out.push({ t: m[1], r: m[2] }); pos = RUBY_RE.lastIndex; }
+  pushAuto(s.slice(pos));
+  return out;
+}
+function autoSegs(text) {
+  let r = !RUBY_LOG && AUTO_CACHE.get(text);
+  if (!r) {
+    r = []; tokenizeAuto(text).forEach(tk => r.push(...tokSegs(tk)));
+    r = r.reduce((a, g) => { const l = a[a.length - 1]; if (l && !l.r && !g.r) l.t += g.t; else a.push({ ...g }); return a; }, []);
+    if (!RUBY_LOG) AUTO_CACHE.set(text, r);
+  }
+  return r;
+}
+function tokenizeAuto(text) {
+  if (window.RubyEngine && window.RubyEngine.ready) return window.RubyEngine.tokenize(text);
+  const keys = Object.keys((store && store.userDict) || {}).filter(Boolean).sort((a, b) => b.length - a.length);   // 辞書エンジンがない時は登録辞書の最長一致だけ
+  const out = []; let i = 0;
+  while (i < text.length) { const k = keys.find(k => text.startsWith(k, i)); if (k) { out.push({ s: k, rd: null }); i += k.length; } else { out.push({ s: text[i], rd: null }); i++; } }
+  return out;
+}
+function tokSegs(tk) {
+  const s = tk.s;
+  if (!KANJI_RE.test(s)) return [{ t: s, r: null }];
+  const ud = (store && store.userDict) || {};
+  let rd = null, src = 'none';
+  if (Object.prototype.hasOwnProperty.call(ud, s)) { rd = ud[s]; src = 'dict'; }
+  else if (BUILTIN_DICT[s]) { rd = BUILTIN_DICT[s]; src = 'std'; }
+  else if (tk.rd) { rd = hira(tk.rd); src = 'auto'; }
+  if (RUBY_LOG && !RUBY_LOG.has(s)) RUBY_LOG.set(s, { reading: rd || '', src });
+  return rd ? alignRuby(s, rd) : [{ t: s, r: null }];
+}
+/* 「扱う／あつかう」→ 扱 だけにルビ（送り仮名を除く）。合わなければ語全体にルビ */
+function alignRuby(s, rd) {
+  const runs = s.match(/[㐀-䶿一-鿿々〆]+|[^㐀-䶿一-鿿々〆]+/g) || [s];
+  if (runs.length === 1) return [{ t: s, r: rd }];
+  const lit = x => hira(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp('^' + runs.map(x => KANJI_RE.test(x[0]) ? '(.+?)' : lit(x)).join('') + '$').exec(rd);
+  if (!m) return [{ t: s, r: rd }];
+  let g = 1; return runs.map(x => KANJI_RE.test(x[0]) ? { t: x, r: m[g++] } : { t: x, r: null });
+}
+function escR(s) {
+  if (!RUBY) return esc(plain(s));
+  return rubySegs(s).map(g => g.r ? `<ruby>${esc(g.t)}<rt>${esc(g.r)}</rt></ruby>` : esc(g.t)).join('');
+}
+const escP = s => esc(plain(s));
+const safeName = s => String(s||'test').replace(/[\\/:*?"<>|]/g,'_').slice(0,60);
+
+/* =====================================================================
+   2. データ(JSON)の形
+   ===================================================================== */
+function newMeta() {
+  return {
+    date: '', title: '令和　年度　　学年　　　　　第　学期定期テスト', kind: '問題用紙',
+    notice: 'マークシートは機械で読み取ります。解答用紙の記入例を参考に、枠からはみ出さないよう、濃くていねいに塗りつぶしなさい。\n読み取れないものや、２か所以上塗りつぶしたものは、原則として×とします。',
+    intro: '各問題の指示にしたがって、解答用紙のマークシートの記号を塗りつぶしなさい。',
+    showName: true, font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
+    showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'flow', keepBank: true,
+    footer: '本教材のすべての権利は作成者が保有しています。本教材の内容は無断で複製、配布、転載することを禁じます。'
+  };
+}
+function newItem(type) {
+  if (type === 'choice')  return { id: uid(), text: '', choices: ['','','',''], correct: 0 };
+  if (type === 'tf')      return { id: uid(), text: '', correct: 0 };          // 0=正しい 1=間違い
+  if (type === 'written') return { id: uid(), text: '', answer: '', lines: 3, points: 3 };
+}
+function newSection(type) {
+  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false };
+  if (type === 'blank')   return { ...base, text: '', distract: '', order: 'shuffle', seed: Math.floor(Math.random()*1e9), manual: '',
+                                  bankNote: '※　同じ語句を何度使っても良い。使わない語句もある。' };
+  if (type === 'choice')  return { ...base, items: [newItem('choice')] };
+  if (type === 'tf')      return { ...base, lead: '次の文が正しいか、間違っているかを考えて答えなさい。', trueLabel: '正しい', falseLabel: '間違っている', items: [newItem('tf')] };
+  if (type === 'written') return { ...base, lead: '次の問いに、枠の中に答えなさい。', items: [newItem('written')] };
+}
+function newExam(name, meta) {
+  return { app:'testmaker', schema: SCHEMA, id: uid(), name: name || '新しいテスト', updatedAt: Date.now(),
+           meta: meta ? clone(meta) : newMeta(), sections: [ newSection('blank') ] };
+}
+/* 古い形のデータを今の形へ。足りない項目を補うだけで、既存の値は消さない */
+function migrate(ex) {
+  ex.schema = SCHEMA;
+  ex.id = ex.id || uid();
+  ex.name = ex.name || '無題のテスト';
+  ex.meta = Object.assign(newMeta(), ex.meta || {});
+  ex.sections = (ex.sections || []).map(s => {
+    const d = newSection(s.type in TYPE_NAMES ? s.type : 'blank');
+    const m = Object.assign(d, s);
+    if (m.items) m.items = m.items.map(it => Object.assign(newItem(m.type) || {}, it, { id: it.id || uid() }));
+    return m;
+  });
+  return ex;
+}
+
+/* 付属サンプル：添付された「令和8年度1学期定期テスト」。正答は文脈から推定したもの（要確認） */
+function sampleExam() {
+  const ex = newExam('サンプル　R8 1学年 技術 1学期（正答は要確認）');
+  ex.meta.date = 'R8.6.17(水)実施';
+  ex.meta.title = '令和８年度　１学年技術・家庭科（技術分野）　１学期定期テスト';
+  ex.meta.notice = 'マークシートは機械で読み取りを行います。解答用紙にある記入例を参考に、きれいに濃く塗りつぶしなさい。機械で読み取れないもの、２か所以上塗りつぶしているものは、原則×とします。';
+  ex.meta.intro = '各文章中の空欄の解答として、最も適したものを各語群の中から一つ選び、解答用紙のマークシートの記号を塗りつぶしなさい。';
+  ex.meta.showPoints = false;
+  const B = (title, text, distract, seed) => Object.assign(newSection('blank'), { title, text, distract, seed });
+  const s1 = B('身の回りの情報の技術・コンピュータの仕組み',
+`私たちの身の回りには、情報を扱うさまざまな技術があります。最近では、離れた場所からスマートフォンでエアコンを操作できるような、インターネットとつながった{{IoT}}家電も増えました。
+そういった機器にはコンピュータが内蔵されており、そのコンピュータはディスプレイやマウスのような{{ハードウェア}}と、ゲームや動画再生アプリのような{{ソフトウェア}}に分類されていました。
+{{@ハードウェア}}には、マウスや{{キーボード}}のような入力機能をもつ機器や、ディスプレイや{{スピーカ}}のような出力機能をもつ機器があります。また、その入出力される情報を計算する、CPUのような{{演算}}機能もありました。
+{{@ソフトウェア}}には、ゲームや動画再生アプリのようなもの以外に、Androidのような{{OS}}もありました。`,
+    'メインメモリ\nHDD\n記憶', 101);
+  const s2 = B('情報のデジタル化',
+`情報には文字、音声、静止画、動画といったさまざまな、{{メディア}}がありました。
+コンピュータの中では、０か１の{{デジタル}}で情報を扱っていました。それに対して、気温や時間など切れ目のない連続した情報として{{アナログ}}がありました。また、数の表現として我々が主に使う{{１０進数}}に対して、コンピュータの中では{{２進数}}を使っていました。情報の最も小さな単位は{{bit}}でした。`,
+    'GB\nbyte\nPB\n１６進数', 202);
+  const s3 = B('情報通信ネットワーク',
+`情報通信ネットワークにつなげる方法として２つの接続方法がありました。{{無線}}接続にはいくつか種類があり、中長距離の接続が可能な{{Wi-Fi}}や、イヤホンなどで使われる短距離の接続が可能な{{Bluetooth}}がありました。
+インターネットで通信をする際は、現実のはがきを送る時と同様に、相手の住所として、「198.51.100.1」のような{{ＩＰアドレス}}と、切手を貼るなどのルールとして、TCP/IPのような{{プロトコル}}がありました。
+現在、学校でも使っているクロムブックは、{{クラウド}}というシステムにより、作成したスライドなどのデータを{{サーバ}}に置くことで、万が一クロムブックが壊れても、データは消えません。`,
+    '有線\nURL\nクライアント', 303);
+  const s4 = B('情報セキュリティの仕組み・情報モラル',
+`インターネットは便利な部分もありますが、危険な面も多くあります。様々な危険から身を守るために様々な機能がありました。ファイアウォールは、{{ホワイトリスト}}という考え方で、外部との通信をあらかじめ許可した相手だけに制限する機能でした。このような機能は、私たちの気づかないところで、動いていますが、私たちでできることもあります。例えば、特定の危険なサイトにアクセスできないようにする{{フィルタリング}}がありました。
+このような様々な情報セキュリティが存在していますが、そもそも、私たちは情報モラルを意識して使っていく必要があります。情報モラルにはマナーのようなものもありますが、創造活動から生み出された成果物の権利、作った人の権利を守るために{{知的財産権}}というものもあります。`,
+    'ブラックリスト\n認証システム\nサイバーセキュリティ\nソフトウェアの更新\n肖像権\nフィッシング詐欺\n暗号化通信', 404);
+  const s5 = B('タイピング',
+`授業の中でタイピングを行いました。最終的に目指してほしいタイピングは、手元を見ずに行う{{ブラインドタッチ}}という方法で、そのためには{{ホームポジション}}を意識してタイピングを行うことが重要でした。{{@ホームポジション}}の時、右手の人差し指は{{J}}キーに置きました。`,
+    'スペース\nフリーポジション\nキーボードタッチ\nG\nF\n人差し指タッチ\nH', 505);
+  const s6 = newSection('tf');
+  s6.title = '中タブレットルール';
+  s6.lead = '中のタブレットルールに基づいて、次の行動が正しいか／間違っているかを考えて答えなさい。';
+  s6.items = [
+    ['「ルールに細かく書いていないことであれば、自分がしたいように使って良い」という考え方は、中の行動指針として正しい。', 1],
+    ['「自分が好きなアイドルの写真に壁紙を変える方が、勉強のやる気が出て効率が上がるので、学習用端末として正しい活用方法である」という考え方は正しいか。', 1],
+    ['部活動中、自分のフォームをチェックするために動画を撮りたいと考えた。この場合、授業中ではないので、担当の先生に許可を取る必要はない。', 1],
+    ['仲の良い友達がパスワードを忘れて困っていたので、助け合うために自分のパスワードを教えて一緒に使うことにした。', 1],
+  ].map(([text, correct]) => ({ id: uid(), text, correct }));
+  ex.sections = [s1, s2, s3, s4, s5, s6];
+  return ex;
+}
+
+/* =====================================================================
+   3. compile  ★中心：入力データ → 番号・記号・正答・警告
+      出力(HTML/Word/CSV)は、すべてこの結果だけを見て作る。
+   ===================================================================== */
+function compile(exam) {
+  const m = exam.meta;
+  const L = LABEL_SETS[m.labelSet] || LABEL_SETS.kana;
+  const maxC = num(m.maxChoices, 0);
+  const C = { meta: m, labels: L, sections: [], answers: [], written: [], warnings: [], itemNo: {}, total: 0 };
+  const W = (si, msg) => C.warnings.push({ sec: si + 1, msg });
+  let n = 0, wn = 0;
+
+  exam.sections.forEach((s, si) => {
+    const sec = { no: si + 1, id: s.id, type: s.type, title: (s.title || '').trim(), lead: (s.lead || '').trim(), notes: [], points: num(s.points, 0) };
+    if (!sec.title) W(si, '見出しが空です');
+
+    if (s.type === 'blank') {
+      const raw = (s.text || '').replace(/｛/g, '{').replace(/｝/g, '}');
+      const blanks = [], last = {};
+      sec.paras = raw.split(/\r?\n/).filter(l => l.trim()).map(line => {
+        const toks = []; let pos = 0, mt; const re = /\{\{\s*(@?)([^{}]*?)\s*\}\}/g;
+        while ((mt = re.exec(line))) {
+          if (mt.index > pos) toks.push({ t: 'text', v: line.slice(pos, mt.index) });
+          const ref = mt[1] === '@', term = mt[2].trim();
+          if (!term) W(si, '空欄 {{ }} の中身が空です');
+          else if (ref) {
+            if (last[term] == null) { W(si, `{{@${term}}} は、先に「${term}」の空欄がないため番号を決められません`); toks.push({ t: 'blank', n: null, term }); }
+            else toks.push({ t: 'blank', n: last[term], term, ref: true });
+          } else { n++; last[term] = n; blanks.push({ n, term }); toks.push({ t: 'blank', n, term }); }
+          pos = re.lastIndex;
+        }
+        if (pos < line.length) toks.push({ t: 'text', v: line.slice(pos) });
+        if (/\{\{|\}\}/.test(toks.filter(t => t.t === 'text').map(t => t.v).join(''))) W(si, '空欄の括弧 {{ }} が正しく閉じていない行があります');
+        return toks;
+      });
+      if (!blanks.length) W(si, '空欄がありません（{{語句}} で囲んで空欄にします）');
+      const uniq = []; blanks.forEach(b => { if (!uniq.includes(b.term)) uniq.push(b.term); });
+      const dis = (s.distract || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+      dis.forEach(d => { if (uniq.includes(d)) W(si, `ダミー「${d}」は正解としても使われています`); });
+      let all = [...uniq]; dis.forEach(d => { if (!all.includes(d)) all.push(d); });
+      if (s.order === 'shuffle') { const sd = (s.seed | 0) + ':'; all.sort((a, b) => hash32(sd + a) - hash32(sd + b)); }
+      else if (s.order === 'manual') {
+        const man = [...new Set((s.manual || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean))];
+        uniq.forEach(t => { if (!man.includes(t)) { man.push(t); W(si, `手動の語群に「${t}」がないため末尾に追加しました`); } });
+        all = man;
+      }
+      if (all.length > L.length) W(si, `語群が${all.length}個あり、記号が足りません（最大${L.length}個）`);
+      else if (maxC && all.length > maxC) W(si, `語群が${all.length}個で、マークシートの最大選択肢数(${maxC})を超えています`);
+      const items = all.map((t, i) => ({ label: L[i] || '？', text: t, isAnswer: uniq.includes(t) }));
+      blanks.forEach(b => { const idx = all.indexOf(b.term); C.answers.push({ no: b.n, label: L[idx] || '？', text: b.term, points: sec.points, sec: sec.no }); });
+      let cols = num(m.bankCols, 0);
+      if (!cols) { const mx = Math.max(0, ...all.map(vlen)); cols = mx <= 4 ? 5 : mx <= 7 ? 4 : mx <= 11 ? 3 : 2; }
+      if (m.showRuby && !num(m.bankCols, 0)) cols = Math.max(2, cols - 1);   // ルビ付きは幅をとるので1段階ゆるめる
+      sec.bank = { items, cols, note: (s.bankNote || '').trim() };
+      sec.blankMap = blanks.map(b => ({ n: b.n, label: L[all.indexOf(b.term)] || '？', term: b.term }));
+    }
+
+    else if (s.type === 'choice') {
+      sec.items = (s.items || []).map(it => {
+        n++; C.itemNo[it.id] = n;
+        const keep = []; let corr = -1;
+        (it.choices || []).forEach((c, i) => { if (String(c).trim()) { if (i === it.correct) corr = keep.length; keep.push(String(c).trim()); } });
+        if (!String(it.text || '').trim()) W(si, `（${n}）の問題文が空です`);
+        if (keep.length < 2) W(si, `（${n}）の選択肢が2つ未満です`);
+        if (keep.length > L.length) W(si, `（${n}）の選択肢が多すぎます`);
+        else if (maxC && keep.length > maxC) W(si, `（${n}）の選択肢数がマークシートの最大(${maxC})を超えています`);
+        if (corr < 0) W(si, `（${n}）の正解が選ばれていません（空の選択肢が正解になっていないか確認）`);
+        else C.answers.push({ no: n, label: L[corr], text: keep[corr], points: sec.points, sec: sec.no });
+        const vmax = Math.max(0, ...keep.map(vlen));
+        const cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
+        return { id: it.id, n, text: (it.text || '').trim(), cols: Math.max(1, cols), choices: keep.map((t, i) => ({ label: L[i] || '？', text: t })) };
+      });
+    }
+
+    else if (s.type === 'tf') {
+      const tl = (s.trueLabel || '正しい').trim(), fl = (s.falseLabel || '間違っている').trim();
+      sec.notes = [`${tl}と考える場合は、マークシートの「${L[0]}」を塗りつぶしなさい。`, `${fl}と考える場合は、マークシートの「${L[1]}」を塗りつぶしなさい。`];
+      sec.items = (s.items || []).map(it => {
+        n++; C.itemNo[it.id] = n;
+        const c = it.correct ? 1 : 0;
+        if (!String(it.text || '').trim()) W(si, `（${n}）の文が空です`);
+        C.answers.push({ no: n, label: L[c], text: c ? fl : tl, points: sec.points, sec: sec.no });
+        return { id: it.id, n, text: (it.text || '').trim() };
+      });
+    }
+
+    else if (s.type === 'written') {
+      sec.items = (s.items || []).map(it => {
+        wn++; C.itemNo[it.id] = '記' + wn;
+        if (!String(it.text || '').trim()) W(si, `記述${wn}の問題文が空です`);
+        const o = { id: it.id, k: wn, text: (it.text || '').trim(), answer: (it.answer || '').trim(), lines: Math.max(1, Math.round(num(it.lines, 3))), points: num(it.points, 0) };
+        C.written.push({ ...o, sec: sec.no });
+        return o;
+      });
+    }
+    C.sections.push(sec);
+  });
+  C.total = C.answers.reduce((a, b) => a + b.points, 0) + C.written.reduce((a, b) => a + b.points, 0);
+  return C;
+}
+
+/* =====================================================================
+   4a. 出力：画面・印刷用HTML
+   ===================================================================== */
+function fontCss(name) { return (FONTS.find(f => f[0] === name) || FONTS[0])[1]; }
+const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
+
+function headingHTML(sec, m) {
+  let pt = '';
+  if (m.showPoints && sec.type !== 'written' && sec.points) pt = `<small>（各${sec.points}点）</small>`;
+  return `<h2><span class="no">${zen(sec.no)}</span><span>${escR(sec.title)}</span>${pt}</h2>`;
+}
+
+function renderPaperHTML(C, force) {
+  const m = C.meta; RUBY = !!(force || m.showRuby); AUTO = RUBY && !!(force || m.autoRuby); let h = '';
+  if (m.date.trim()) h += `<div class="p-date">${escR(m.date)}</div>`;
+  h += `<div class="p-title">${escR(m.title)}</div><div class="p-kind">${escR(m.kind)}</div>`;
+  if (m.showName) h += `<div class="p-name"><span class="ln"></span>年<span class="ln"></span>組<span class="ln"></span>番　名前<span class="ln w"></span></div>`;
+  const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  if (nl.length) h += `<div class="p-notice">${nl.map(x => `<div>※　${escR(x)}</div>`).join('')}</div>`;
+  if (m.intro.trim()) h += `<p class="p-intro">${escR(m.intro.trim())}</p>`;
+
+  C.sections.forEach(sec => {
+    h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}">${headingHTML(sec, m)}`;
+    if (sec.lead) h += `<p class="lead">${escR(sec.lead)}</p>`;
+    sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
+
+    if (sec.type === 'blank') {
+      sec.paras.forEach((toks, i) => {
+        h += `<p class="para${m.keepBank && i === sec.paras.length - 1 ? ' last' : ''}">` +
+          toks.map(t => t.t === 'text' ? escR(t.v) : blankHTML(t)).join('') + '</p>';
+      });
+      const b = sec.bank;
+      h += `<div class="bank"><div class="bank-h"><b>語群</b>${b.note ? `<span>${escR(b.note)}</span>` : ''}</div>` +
+        `<div class="bank-g" style="grid-template-columns:repeat(${b.cols},1fr)">` +
+        b.items.map(it => `<div><span class="lab">${escR(it.label)}</span>${escR(it.text)}</div>`).join('') + '</div></div>';
+    }
+    else if (sec.type === 'choice') {
+      sec.items.forEach(it => {
+        h += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>` +
+          `<div class="q-c" style="grid-template-columns:repeat(${it.cols},auto)">` +
+          it.choices.map(c => `<div><span class="lab">${escR(c.label)}</span>${escR(c.text)}</div>`).join('') + '</div></div>';
+      });
+    }
+    else if (sec.type === 'tf') {
+      sec.items.forEach(it => h += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div></div>`);
+    }
+    else if (sec.type === 'written') {
+      sec.items.forEach(it => {
+        const pt = m.showPoints && it.points ? `<span class="pt">（${it.points}点）</span>` : '';
+        h += `<div class="q"><div class="q-t"><span class="qn">（記${it.k}）</span>${escR(it.text)}${pt}</div>` +
+          `<div class="ansbox" style="height:${it.lines * 9}mm"></div></div>`;
+      });
+    }
+    h += '</section>';
+  });
+  return h;
+}
+
+function renderKeyHTML(C) {
+  const m = C.meta; let h = `<div class="k-title">正答一覧</div><div class="k-sub">${escP(m.title)}　（マークシート ${C.answers.length}問 ／ 記述 ${C.written.length}問 ／ 合計 ${C.total}点）</div>`;
+  C.sections.forEach(sec => {
+    const rows = C.answers.filter(a => a.sec === sec.no);
+    const wr = C.written.filter(a => a.sec === sec.no);
+    h += `<div class="k-sec"><h2>${zen(sec.no)}　${escP(sec.title)}</h2><div class="k-grid">`;
+    rows.forEach(a => h += `<div class="k-row"><span class="n">${a.no}</span><span class="a">${escP(a.label)}</span><span class="t">${escP(a.text)}</span><span class="p">${a.points}点</span></div>`);
+    wr.forEach(a => h += `<div class="k-row"><span class="n">記${a.k}</span><span class="t">${escP(a.answer || '（模範解答なし）')}</span><span class="p">${a.points}点</span></div>`);
+    h += '</div></div>';
+  });
+  return h;
+}
+
+/* =====================================================================
+   4b. 出力：正答CSV（採点アプリ取り込み用の素材。列は必要に応じて調整）
+   ===================================================================== */
+function buildCSV(C) {
+  const q = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+  const rows = [['番号', '正答記号', '正答の位置(1始まり)', '正答の語句', '配点', '大問']];
+  C.answers.forEach(a => rows.push([a.no, a.label, C.labels.indexOf(a.label) + 1, plain(a.text), a.points, a.sec]));
+  C.written.forEach(a => rows.push(['記' + a.k, '', '', plain(a.answer), a.points, a.sec]));
+  return '﻿' + rows.map(r => r.map(q).join(',')).join('\r\n') + '\r\n';
+}
+
+/* =====================================================================
+   4b2. 出力：採点アプリ連携用JSON（★2つのアプリの約束事。形を変えるときは schema を上げる）
+   ===================================================================== */
+function buildKeyJSON(C, ex) {
+  const secs = C.sections.map(sec => {
+    const a = C.answers.filter(x => x.sec === sec.no);
+    return { no: sec.no, title: plain(sec.title), type: sec.type, from: a.length ? a[0].no : null, to: a.length ? a[a.length - 1].no : null,
+             points: a.reduce((t, x) => t + x.points, 0) + C.written.filter(w => w.sec === sec.no).reduce((t, x) => t + x.points, 0) };
+  });
+  return {
+    app: 'testmaker-answerkey', schema: 1, exportedAt: new Date().toISOString(),
+    exam: { id: ex.id, name: ex.name, title: C.meta.title, date: C.meta.date },
+    labels: C.labels.slice(0, Math.max(num(C.meta.maxChoices, 10), 1)), total: C.total,
+    items: C.answers.map(a => ({ no: a.no, section: a.sec, label: a.label, index: C.labels.indexOf(a.label) + 1, text: plain(a.text), points: a.points })),
+    written: C.written.map(w => ({ id: '記' + w.k, section: w.sec, answer: plain(w.answer), points: w.points, lines: w.lines })),
+    sections: secs
+  };
+}
+
+/* =====================================================================
+   4c. 出力：Word(.docx)  ※外部ライブラリなし。XMLとZIPを自前で組み立てる
+   ===================================================================== */
+const X = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+let BOLD_FONT = null;
+function R(t, o = {}) {           // run
+  let r = '';
+  if (o.b && BOLD_FONT) r += `<w:rFonts w:ascii="${X(BOLD_FONT)}" w:hAnsi="${X(BOLD_FONT)}" w:eastAsia="${X(BOLD_FONT)}" w:cs="${X(BOLD_FONT)}"/>`;
+  if (o.b) r += '<w:b/><w:bCs/>';
+  if (o.color) r += `<w:color w:val="${o.color}"/>`;
+  if (o.spacing) r += `<w:spacing w:val="${o.spacing}"/>`;
+  if (o.sz) r += `<w:sz w:val="${o.sz}"/><w:szCs w:val="${o.sz}"/>`;
+  if (o.u) r += '<w:u w:val="single"/>';
+  if (o.bdr) r += '<w:bdr w:val="single" w:sz="4" w:space="0" w:color="000000"/>';
+  if (o.shd) r += `<w:shd w:val="clear" w:color="auto" w:fill="${o.shd}"/>`;
+  return `<w:r>${r ? `<w:rPr>${r}</w:rPr>` : ''}<w:t xml:space="preserve">${X(t)}</w:t></w:r>`;
+}
+let BASE_SZ = 22;
+function RR(t, o = {}) {                // ルビ対応の run 群
+  if (!RUBY) return R(plain(t), o);
+  const base = o.sz || BASE_SZ, rs = Math.max(9, Math.round(base * 0.55));
+  return rubySegs(t).map(g => !g.r ? R(g.t, o) :
+    `<w:r><w:ruby><w:rubyPr><w:rubyAlign w:val="distributeSpace"/><w:hps w:val="${rs}"/><w:hpsRaise w:val="${base}"/><w:hpsBaseText w:val="${base}"/><w:lid w:val="ja-JP"/></w:rubyPr><w:rt>${R(g.r, { ...o, sz: rs, b: false })}</w:rt><w:rubyBase>${R(g.t, o)}</w:rubyBase></w:ruby></w:r>`).join('');
+}
+const TAB = '<w:r><w:tab/></w:r>';
+function P(runs, o = {}) {        // paragraph
+  let p = '';
+  if (o.keepNext) p += '<w:keepNext/>';
+  if (o.keepLines) p += '<w:keepLines/>';
+  if (o.pbb) p += '<w:pageBreakBefore/>';
+  if (o.box) p += '<w:pBdr><w:top w:val="single" w:sz="12" w:space="3" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="6" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="3" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="6" w:color="000000"/></w:pBdr>';
+  if (o.underline) p += '<w:pBdr><w:bottom w:val="single" w:sz="16" w:space="2" w:color="000000"/></w:pBdr>';
+  if (o.tabs) p += `<w:tabs>${o.tabs}</w:tabs>`;
+  p += `<w:spacing w:before="${o.before || 0}" w:after="${o.after || 0}"${o.line ? ` w:line="${Math.round(o.line * BASE_SZ / 20)}" w:lineRule="atLeast"` : ''}/>`;
+  if (o.left != null || o.hanging != null || o.first != null || o.right != null)
+    p += `<w:ind w:left="${o.left || 0}"${o.right ? ` w:right="${o.right}"` : ''}${o.hanging ? ` w:hanging="${o.hanging}"` : ''}${o.first ? ` w:firstLine="${o.first}"` : ''}/>`;
+  if (o.jc) p += `<w:jc w:val="${o.jc}"/>`;
+  return `<w:p><w:pPr>${p}</w:pPr>${Array.isArray(runs) ? runs.join('') : runs}</w:p>`;
+}
+const SPACER = (h = 100) => `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="${h}" w:lineRule="exact"/></w:pPr></w:p>`;
+/* table: rows=[{cells:[{w,span,xml,shd}],h,rule}] */
+function TBL(rows, grid, o = {}) {
+  const bd = o.box ? '<w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/>'
+    : o.grid ? '<w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>' : '';
+  const total = grid.reduce((a, b) => a + b, 0);
+  let x = `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/>${o.ind ? `<w:tblInd w:w="${o.ind}" w:type="dxa"/>` : ''}` +
+    `<w:tblBorders>${bd || '<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>'}<w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>` +
+    `<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="${o.padV ?? 30}" w:type="dxa"/><w:left w:w="${o.padH ?? 110}" w:type="dxa"/><w:bottom w:w="${o.padV ?? 30}" w:type="dxa"/><w:right w:w="${o.padH ?? 110}" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
+    `<w:tblGrid>${grid.map(g => `<w:gridCol w:w="${g}"/>`).join('')}</w:tblGrid>`;
+  rows.forEach(r => {
+    x += `<w:tr><w:trPr><w:cantSplit/>${r.h ? `<w:trHeight w:val="${r.h}" w:hRule="${r.rule || 'atLeast'}"/>` : ''}</w:trPr>`;
+    r.cells.forEach(c => {
+      x += `<w:tc><w:tcPr><w:tcW w:w="${c.w}" w:type="dxa"/>${c.span > 1 ? `<w:gridSpan w:val="${c.span}"/>` : ''}` +
+        (c.bottom ? '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders>' : '') +
+        (c.shd ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.shd}"/>` : '') + `</w:tcPr>${c.xml}</w:tc>`;
+    });
+    x += '</w:tr>';
+  });
+  return x + '</w:tbl>';
+}
+const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+
+function buildDocx(C) {
+  const m = C.meta, FW = 10106, IND = 800; RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
+  BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
+  const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
+  const lab = t => R(t, { b: true, bdr: true });
+  const body = [];
+
+  // ---- ヘッダ部 ----
+  if (m.date.trim()) body.push(P(R(m.date, { sz: 18 }), { jc: 'right' }));
+  body.push(P(RR(m.title, { b: true, sz: 28 }), { jc: 'center', before: 40, after: 20 }));
+  body.push(P(R(m.kind, { b: true, sz: 40, spacing: 80 }), { jc: 'center', after: 80 }));
+  if (m.showName) {
+    body.push(P([TAB, R('年'), TAB, R('組'), TAB, R('番　名前'), TAB],
+      { left: 2600, before: 40, after: 160, jc: 'left',
+        tabs: '<w:tab w:val="right" w:leader="underscore" w:pos="4000"/><w:tab w:val="right" w:leader="underscore" w:pos="5100"/><w:tab w:val="right" w:leader="underscore" w:pos="6200"/><w:tab w:val="right" w:leader="underscore" w:pos="' + FW + '"/>' }));
+  }
+  const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  nl.forEach((x, i) => body.push(P(RR('※　' + x, { b: true, sz: sz - 1 }), { box: true, left: 120, right: 120, hanging: 0, line: 300, before: i === 0 ? 40 : 0, after: i === nl.length - 1 ? 120 : 0 })));
+  if (m.intro.trim()) body.push(P(RR(m.intro.trim()), { first: unit, line: 340, after: 60 }));
+
+  // ---- 大問 ----
+  C.sections.forEach(sec => {
+    const pt = (m.showPoints && sec.type !== 'written' && sec.points) ? [R(`　（各${sec.points}点）`, { sz: sz - 3 })] : [];
+    body.push(P([R(' ' + zen(sec.no) + ' ', { b: true, color: 'FFFFFF', shd: '000000', sz: sz + 2 }), RR('　' + sec.title, { b: true, sz: sz + 2 }), ...pt],
+      { keepNext: true, underline: true, before: 240, after: 80, line: 320, pbb: m.pageMode === 'section' && sec.no > 1 }));
+    if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: 330, after: 40, keepNext: true }));
+    sec.notes.forEach(x => body.push(P(RR('※　' + x, { sz: sz - 1 }), { left: unit * 1.2, hanging: unit * 1.2, line: 320, after: 20, keepNext: true })));
+
+    if (sec.type === 'blank') {
+      sec.paras.forEach((toks, i) => {
+        const runs = toks.map(t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
+        body.push(P(runs, { first: unit, line: 400, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
+      });
+      const b = sec.bank, cols = b.cols, cw = Math.floor(FW / cols);
+      const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? FW - cw * (cols - 1) : cw);
+      const rows = [{ cells: [{ w: FW, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
+      const lines = chunk(b.items, cols);
+      lines.forEach((ln, ri) => {
+        const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+        for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
+        rows.push({ cells });
+      });
+      body.push(TBL(rows, grid, { box: true, padV: 25 }), SPACER(120));
+    }
+    else if (sec.type === 'choice') {
+      sec.items.forEach(it => {
+        body.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
+        const cols = it.cols, avail = FW - IND, cw = Math.floor(avail / cols);
+        const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
+        const rows = chunk(it.choices, cols).map(ln => {
+          const cells = ln.map((c, ci) => ({ w: grid[ci], xml: P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
+          for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
+          return { cells };
+        });
+        body.push(TBL(rows, grid, { ind: IND - 110, padV: 10 }), SPACER(60));
+      });
+    }
+    else if (sec.type === 'tf') {
+      sec.items.forEach(it => body.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 360, before: 40, after: 40, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` })));
+    }
+    else if (sec.type === 'written') {
+      sec.items.forEach(it => {
+        const ptx = m.showPoints && it.points ? [R(`　（${it.points}点）`, { sz: sz - 3 })] : [];
+        body.push(P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
+        const w = FW - IND;
+        body.push(TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w, xml: P('') }] }], [w], { ind: IND - 110, grid: true }), SPACER(80));
+      });
+    }
+  });
+  body.push(P(''));   // 本文末は必ず段落で終える
+
+  const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const sect = '<w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="900" w:bottom="1000" w:left="900" w:header="567" w:footer="450" w:gutter="0"/></w:sectPr>';
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body.join('')}${sect}</w:body></w:document>`;
+  const ftr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="${FW}"/></w:tabs><w:spacing w:before="0" w:after="0"/></w:pPr>` +
+    R(m.footer.trim(), { sz: 16 }) + TAB +
+    '<w:fldSimple w:instr=" PAGE "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>' + R(' / ', { sz: 18 }) +
+    '<w:fldSimple w:instr=" NUMPAGES "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>';
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}" w:cs="${font}" w:hint="eastAsia"/><w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="en-US" w:eastAsia="ja-JP" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`;
+  const settings = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:updateFields w:val="true"/><w:defaultTabStop w:val="840"/><w:characterSpacingControl w:val="compressPunctuation"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
+  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>';
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
+  const drels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>';
+  const enc = new TextEncoder();
+  return zipStore([
+    ['[Content_Types].xml', ct], ['_rels/.rels', rels], ['word/document.xml', docXml], ['word/_rels/document.xml.rels', drels],
+    ['word/styles.xml', styles], ['word/settings.xml', settings], ['word/footer1.xml', ftr]
+  ].map(([name, s]) => ({ name, data: enc.encode(s) })), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+}
+
+/* ---- 最小のZIP書き出し（無圧縮）---- */
+let _crcT = null;
+function crc32(u8) {
+  if (!_crcT) { _crcT = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; _crcT[i] = c >>> 0; } }
+  let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = _crcT[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files, mime) {
+  const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+  const d = new Date(), dt = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dd = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  files.forEach(f => {
+    const nm = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, dt, true); lh.setUint16(12, dd, true); lh.setUint32(14, crc, true); lh.setUint32(18, sz, true); lh.setUint32(22, sz, true);
+    lh.setUint16(26, nm.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), nm, f.data);
+    const ce = new DataView(new ArrayBuffer(46));
+    ce.setUint32(0, 0x02014b50, true); ce.setUint16(4, 20, true); ce.setUint16(6, 20, true); ce.setUint16(8, 0x0800, true); ce.setUint16(10, 0, true);
+    ce.setUint16(12, dt, true); ce.setUint16(14, dd, true); ce.setUint32(16, crc, true); ce.setUint32(20, sz, true); ce.setUint32(24, sz, true);
+    ce.setUint16(28, nm.length, true); ce.setUint32(42, off, true);
+    cen.push(new Uint8Array(ce.buffer), nm);
+    off += 30 + nm.length + sz;
+  });
+  const cdSize = cen.reduce((a, b) => a + b.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true); end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, new Uint8Array(end.buffer)], { type: mime });
+}
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* =====================================================================
+   5. 保存(storage)・バックアップ・履歴
+   ===================================================================== */
+let store = null;           // { v, current, exams:[...], snaps:[...], lastBackupAt, lastChangeAt, lastSnapAt }
+let saveFailed = false;
+const cur = () => store.exams.find(e => e.id === store.current);
+
+function loadStore() {
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.exams) && s.exams.length) { s.exams.forEach(migrate); s.snaps = s.snaps || []; s.userDict = s.userDict || {}; if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id; return s; } } } catch (e) { console.warn(e); }
+  const ex = sampleExam();
+  return { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
+}
+function saveStore() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(store)); saveFailed = false; store.savedAt = Date.now(); }
+  catch (e) { saveFailed = true; console.warn(e); }
+  updateStatus();
+}
+let _saveT = null;
+function saveSoon() { clearTimeout(_saveT); _saveT = setTimeout(saveStore, 500); }
+function snapshot(force, label) {
+  const now = Date.now();
+  if (!force && now - (store.lastSnapAt || 0) < 10 * 60 * 1000) return;
+  const ex = cur(); if (!ex) return;
+  store.snaps.unshift({ t: now, label: label || '自動', exam: clone(ex) });
+  store.snaps = store.snaps.slice(0, 40); store.lastSnapAt = now;
+}
+function touch() {
+  const ex = cur(); ex.updatedAt = Date.now(); store.lastChangeAt = ex.updatedAt;
+  snapshot(false); saveSoon(); refreshSoon();
+}
+
+function exportBackup() {
+  store.exams.forEach(e => e.schema = SCHEMA);
+  const data = { app: 'testmaker', schema: SCHEMA, exportedAt: new Date().toISOString(), exams: store.exams, userDict: store.userDict };
+  download(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `テスト問題メーカー_バックアップ_${stamp()}.json`);
+  store.lastBackupAt = Date.now(); saveStore(); toast('バックアップを保存しました（ダウンロードフォルダを確認。Googleドライブ等にも置いてください）');
+}
+function importBackup(file) {
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const d = JSON.parse(fr.result);
+      if (d.userDict) Object.keys(d.userDict).forEach(k => { if (!(k in store.userDict)) store.userDict[k] = d.userDict[k]; });   // 辞書は不足分だけ追加
+      const list = d.exams || (d.sections ? [d] : (d.userDict ? [] : null));
+      if (!list) throw new Error('形式が違います');
+      if (!list.length) { AUTO_CACHE.clear(); saveStore(); refresh(); toast('ルビ辞書を読み込みました'); return; }
+      snapshot(true, '読み込み前');
+      let first = null;
+      list.forEach(ex => { const c = migrate(clone(ex)); c.id = uid(); c.name = c.name + '（読込 ' + fmtTime(Date.now()) + '）'; store.exams.push(c); first = first || c; });
+      store.current = first.id; saveStore(); renderAll(); toast(`${list.length}件のテストを読み込みました（既存のテストは変更していません）`);
+    } catch (e) { alert('読み込めませんでした。このアプリで保存したバックアップ(.json)を選んでください。\n' + e.message); }
+  };
+  fr.readAsText(file);
+}
+
+/* =====================================================================
+   6. 画面
+   ===================================================================== */
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  kids.flat().forEach(c => { if (c == null || c === false) return; e.append(c.nodeType ? c : document.createTextNode(c)); });
+  return e;
+}
+const btn = (label, fn, title, cls = '') => h('button', { type: 'button', class: 'btn small ' + cls, title: title || '', onclick: fn }, label);
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 3200); }
+function move(arr, i, d) { const j = i + d; if (j < 0 || j >= arr.length) return false; [arr[i], arr[j]] = [arr[j], arr[i]]; return true; }
+
+function bindText(obj, key, o = {}) {
+  const tag = o.tag || 'input';
+  const e = h(tag, { type: tag === 'input' ? (o.type || 'text') : null, placeholder: o.ph, rows: o.rows, class: o.cls || '', min: o.min, max: o.max, step: o.step });
+  e.value = obj[key] ?? '';
+  e.addEventListener('input', () => { obj[key] = o.type === 'number' ? num(e.value, 0) : e.value; touch(); });
+  return e;
+}
+function bindSelect(obj, key, opts, o = {}) {
+  const e = h('select', {}, opts.map(([v, l]) => h('option', { value: v }, l)));
+  e.value = String(obj[key]);
+  e.addEventListener('change', () => { obj[key] = o.numeric ? Number(e.value) : e.value; touch(); if (o.redraw) renderEditor(); });
+  return e;
+}
+function bindCheck(obj, key, label) {
+  const e = h('input', { type: 'checkbox' }); e.checked = !!obj[key];
+  e.addEventListener('change', () => { obj[key] = e.checked; touch(); });
+  return h('label', { class: 'row', style: 'gap:6px;margin:6px 0' }, e, label);
+}
+const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('div', { class: 'hint' }, hint) : null);
+
+/* ---- 基本設定 ---- */
+let ui = { settingsOpen: false, tab: 'paper' };
+function settingsCard(ex) {
+  const m = ex.meta;
+  const d = h('details', { class: 'card' }, h('summary', {}, '基本設定（タイトル・注意書き・体裁）'));
+  if (ui.settingsOpen) d.open = true;
+  d.addEventListener('toggle', () => ui.settingsOpen = d.open);
+  d.append(
+    h('div', { class: 'row' }, field('実施日（右上に表示。空なら非表示）', bindText(m, 'date', { ph: 'R8.6.17(水)実施' })), field('「問題用紙」の部分', bindText(m, 'kind'))),
+    field('タイトル', bindText(m, 'title')),
+    field('注意書き（枠で囲んで表示。1行1項目、先頭の※は自動）', bindText(m, 'notice', { tag: 'textarea', rows: 3 })),
+    field('全体の指示文（注意書きの下。空なら非表示）', bindText(m, 'intro', { tag: 'textarea', rows: 2 })),
+    h('div', { class: 'row' },
+      field('選択肢の記号', bindSelect(m, 'labelSet', Object.entries(LABEL_NAMES))),
+      field('文字の大きさ', bindSelect(m, 'size', [[10.5, '10.5pt（小）'], [11, '11pt（標準）'], [12, '12pt（大）']], { numeric: true }))),
+    h('div', { class: 'row' },
+      field('フォント（Word出力で使用）', bindSelect(m, 'font', FONTS.map(f => [f[0], f[0]]))),
+      field('語群の列数', bindSelect(m, 'bankCols', [[0, '自動'], [2, '2列'], [3, '3列'], [4, '4列'], [5, '5列']], { numeric: true }))),
+    h('div', { class: 'row' },
+      field('マークシートの最大選択肢数', bindText(m, 'maxChoices', { type: 'number', min: 2, max: 20 }), 'これを超えると警告します'),
+      h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
+    bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
+    field('改ページ', bindSelect(m, 'pageMode', [['flow', '続けて詰める（ページいっぱいに使う）'], ['section', '大問ごとに改ページ']])),
+    field('ページ下の文言（著作権表示など）', bindText(m, 'footer'))
+  );
+  return d;
+}
+
+/* ---- 大問カード ---- */
+function sectionCard(s, i, ex) {
+  const L = LABEL_SETS[ex.meta.labelSet] || LABEL_SETS.kana;
+  const card = h('div', { class: 'card' });
+  const head = h('div', { class: 'sc-head' },
+    h('span', { class: 'badge' }, '大問 ' + (i + 1)),
+    bindText(s, 'title', { ph: '見出し（例：情報通信ネットワーク）', cls: 'grow' }),
+    h('span', { class: 'tag' }, TYPE_NAMES[s.type]),
+    btn(s.collapsed ? '開く' : '閉じる', () => { s.collapsed = !s.collapsed; touch(); renderEditor(); }, '内容を折りたたむ'),
+    btn('▲', () => { if (move(ex.sections, i, -1)) { touch(); renderEditor(); } }, '上へ'),
+    btn('▼', () => { if (move(ex.sections, i, 1)) { touch(); renderEditor(); } }, '下へ'),
+    btn('複製', () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => it.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); }, 'この大問をコピー'),
+    btn('削除', () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); touch(); renderEditor(); } }, '', 'danger'));
+  card.append(head);
+  if (s.collapsed) return card;
+
+  const lead = field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 }));
+
+  if (s.type === 'blank') {
+    const ta = bindText(s, 'text', { tag: 'textarea', rows: 9 });
+    const wrap = (pre) => () => {
+      const a = ta.selectionStart, b = ta.selectionEnd;
+      if (a === b) { toast('本文の中で、空欄にしたい語句を選択してから押してください'); return; }
+      const sel = ta.value.slice(a, b);
+      if (/\n/.test(sel)) { toast('1行の中で選択してください'); return; }
+      ta.value = ta.value.slice(0, a) + '{{' + pre + sel + '}}' + ta.value.slice(b);
+      s.text = ta.value; const p = a + 4 + pre.length + sel.length; ta.setSelectionRange(p, p); ta.focus(); touch();
+    };
+    const noDown = e => e.preventDefault();
+    card.append(...[lead,
+      h('label', { class: 'field' }, h('span', {}, '本文（改行で段落が分かれます）'), ta),
+      h('div', { class: 'row', style: 'margin:-2px 0 4px' },
+        h('button', { type: 'button', class: 'btn small primary', onmousedown: noDown, onclick: wrap('') }, '選択した語句を空欄にする'),
+        h('button', { type: 'button', class: 'btn small', onmousedown: noDown, onclick: wrap('@') }, '同じ空欄をもう一度使う')),
+      h('div', { class: 'hint' }, '手で書く場合：', h('code', {}, '{{語句}}'), ' が空欄（正解になり、語群へ自動で入り、番号が付く）。先に出た空欄を再登場させるときは ', h('code', {}, '{{@語句}}'), '。'),
+      field('ダミー（正解にならない語群の語句。1行に1つ）', bindText(s, 'distract', { tag: 'textarea', rows: 3 })),
+      h('div', { class: 'row' },
+        field('語群の並び', bindSelect(s, 'order', [['shuffle', '自動（正解の位置が偏らないよう混ぜる）'], ['appear', '本文に出てきた順'], ['manual', '手動（下の欄の順）']], { redraw: true })),
+        s.order === 'shuffle' ? btn('並べ直す', () => { s.seed = Math.floor(Math.random() * 1e9); touch(); }, '別の並びにする') : null,
+        field('1空欄の配点', bindText(s, 'points', { type: 'number', min: 0, step: 0.5 }))),
+      s.order === 'manual' ? h('div', {},
+        field('語群の順番（1行に1語。上から ア・イ・ウ…）', bindText(s, 'manual', { tag: 'textarea', rows: 6 })),
+        btn('今の語群をここに取り込む', () => { const c = compile(ex).sections.find(x => x.id === s.id); s.manual = c.bank.items.map(x => x.text).join('\n'); touch(); renderEditor(); })) : null,
+      field('語群の注意書き', bindText(s, 'bankNote')),
+      h('div', { class: 'blankmap', 'data-map': s.id })].filter(Boolean));
+  }
+
+  else if (s.type === 'choice') {
+    card.append(lead, field('1問の配点', bindText(s, 'points', { type: 'number', min: 0, step: 0.5 })));
+    s.items.forEach((it, qi) => {
+      const box = h('div', { class: 'sub' },
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), h('span', { class: 'spacer' }),
+          btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
+          btn('削除', () => { s.items.splice(qi, 1); touch(); renderEditor(); }, '', 'danger')),
+        bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '問題文', cls: 'grow' }),
+        h('div', { class: 'hint' }, '正解の選択肢の左の ● を選びます'));
+      it.choices.forEach((c, ci) => {
+        const rb = h('input', { type: 'radio', name: 'r_' + it.id, title: '正解' }); rb.checked = it.correct === ci;
+        rb.addEventListener('change', () => { it.correct = ci; touch(); });
+        const inp = h('input', { type: 'text', placeholder: '選択肢' }); inp.value = c;
+        inp.addEventListener('input', () => { it.choices[ci] = inp.value; touch(); });
+        box.append(h('div', { class: 'copt' }, h('span', { class: 'lab' }, L[ci] || '？'), rb, inp,
+          btn('✕', () => { it.choices.splice(ci, 1); if (it.correct === ci) it.correct = 0; else if (it.correct > ci) it.correct--; touch(); renderEditor(); }, 'この選択肢を消す')));
+      });
+      box.append(btn('＋ 選択肢を追加', () => { it.choices.push(''); touch(); renderEditor(); }));
+      card.append(box);
+    });
+    card.append(btn('＋ 問題を追加', () => { s.items.push(newItem('choice')); touch(); renderEditor(); }));
+  }
+
+  else if (s.type === 'tf') {
+    card.append(lead,
+      h('div', { class: 'row' }, field('1問の配点', bindText(s, 'points', { type: 'number', min: 0, step: 0.5 })),
+        field('「' + L[0] + '」の意味', bindText(s, 'trueLabel')), field('「' + L[1] + '」の意味', bindText(s, 'falseLabel'))));
+    s.items.forEach((it, qi) => {
+      const sel = h('select', {}, h('option', { value: 0 }, '正解：' + L[0] + '（' + (s.trueLabel || '正しい') + '）'), h('option', { value: 1 }, '正解：' + L[1] + '（' + (s.falseLabel || '間違っている') + '）'));
+      sel.value = it.correct ? 1 : 0; sel.addEventListener('change', () => { it.correct = Number(sel.value); touch(); });
+      card.append(h('div', { class: 'sub' },
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), sel, h('span', { class: 'spacer' }),
+          btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
+          btn('削除', () => { s.items.splice(qi, 1); touch(); renderEditor(); }, '', 'danger')),
+        bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '判定させる文', cls: 'grow' })));
+    });
+    card.append(btn('＋ 問題を追加', () => { s.items.push(newItem('tf')); touch(); renderEditor(); }));
+  }
+
+  else if (s.type === 'written') {
+    card.append(lead);
+    s.items.forEach((it, qi) => {
+      card.append(h('div', { class: 'sub' },
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), h('span', { class: 'spacer' }),
+          btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
+          btn('削除', () => { s.items.splice(qi, 1); touch(); renderEditor(); }, '', 'danger')),
+        bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '問題文', cls: 'grow' }),
+        field('模範解答（正答一覧にだけ載ります）', bindText(it, 'answer')),
+        h('div', { class: 'row' }, field('解答欄の行数', bindText(it, 'lines', { type: 'number', min: 1, max: 20 })), field('配点', bindText(it, 'points', { type: 'number', min: 0, step: 0.5 })))));
+    });
+    card.append(h('div', { class: 'hint' }, '記述問題はマークシートの番号には数えず、「記１」「記２」…と別に番号を振ります。'),
+      btn('＋ 問題を追加', () => { s.items.push(newItem('written')); touch(); renderEditor(); }));
+  }
+  return card;
+}
+
+let lastField = null;
+document.addEventListener('focusin', e => { if (e.target.matches && e.target.matches('#editor input[type=text], #editor textarea')) lastField = e.target; });
+function addRuby() {
+  const f = lastField;
+  if (!f || !document.contains(f)) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
+  const a = f.selectionStart, b = f.selectionEnd;
+  if (a == null || a === b) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
+  const sel = f.value.slice(a, b);
+  if (/[\[\]|\n]/.test(sel)) { toast('その範囲にはルビを付けられません（[ ] | 改行を含まない範囲を選択）'); return; }
+  const r = prompt(`「${sel}」の読みがな`, ''); if (!r || !r.trim()) return;
+  f.value = f.value.slice(0, a) + '[' + sel + '|' + r.trim() + ']' + f.value.slice(b);
+  f.dispatchEvent(new Event('input')); f.focus();
+}
+function renderEditor() {
+  const ex = cur(), root = $('#editor'), sc = root.scrollTop;
+  const chk = (key, label, redraw) => { const c = h('input', { type: 'checkbox' }); c.checked = !!ex.meta[key];
+    c.addEventListener('change', () => { ex.meta[key] = c.checked; AUTO_CACHE.clear(); touch(); renderEditor(); }); return h('label', { class: 'row', style: 'gap:5px' }, c, label); };
+  const tool = h('div', { class: 'edtool' },
+    h('button', { type: 'button', class: 'btn small primary', onmousedown: e => e.preventDefault(), onclick: addRuby, title: '入力欄で漢字を選んでから押す' }, '選択した語句にルビを付ける'),
+    chk('showRuby', 'ルビを表示'),
+    ex.meta.showRuby ? chk('autoRuby', '漢字すべてに自動でルビ') : null,
+    ex.meta.showRuby && ex.meta.autoRuby ? h('button', { type: 'button', class: 'btn small', onclick: openRubyDialog }, 'ルビの確認・辞書') : null,
+    h('span', { class: 'hint', id: 'rubyStat', style: 'margin:0' }));
+  root.replaceChildren(tool, settingsCard(ex), ...ex.sections.map((s, i) => sectionCard(s, i, ex)),
+    h('div', { class: 'addbar' }, h('b', {}, '大問を追加：'),
+      ...Object.entries(TYPE_NAMES).map(([t, n]) => h('button', { type: 'button', class: 'btn', onclick: () => { ex.sections.push(newSection(t)); touch(); renderEditor(); setTimeout(() => root.scrollTo({ top: root.scrollHeight, behavior: 'smooth' }), 30); } }, '＋ ' + n))));
+  root.scrollTop = sc;
+  setRubyStat();
+  refresh();
+}
+
+/* ---- プレビュー・警告・状態表示 ---- */
+let C = null, _rt = null;
+function refreshSoon() { clearTimeout(_rt); _rt = setTimeout(refresh, 120); }
+function refresh() {
+  const ex = cur(); C = compile(ex);
+  if (needEngine(ex) && engState === 'idle') ensureEngine();
+  const host = $('#sheetHost');
+  const html = ui.tab === 'paper' ? renderPaperHTML(C) : renderKeyHTML(C);
+  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="--fs:${ex.meta.size}pt;font-family:${fontCss(ex.meta.font)}">${html}</div>`;
+  fitPreview();
+  // 警告
+  const w = $('#warns');
+  w.innerHTML = C.warnings.length
+    ? `<div class="warns"><b>確認してください（${C.warnings.length}件）</b><ul>${C.warnings.map(x => `<li>大問${x.sec}：${esc(x.msg)}</li>`).join('')}</ul></div>`
+    : `<div class="warns ok">警告はありません</div>`;
+  // 編集欄の自動表示（番号・空欄一覧）
+  document.querySelectorAll('[data-qid]').forEach(el => { const no = C.itemNo[el.dataset.qid]; el.textContent = no == null ? '' : `（${no}）`; });
+  document.querySelectorAll('[data-map]').forEach(el => {
+    const sec = C.sections.find(x => x.id === el.dataset.map); if (!sec || !sec.blankMap) return;
+    const items = sec.blankMap.map(b => `（${zen(b.n)}）→<b>${esc(b.label)}</b> ${esc(plain(b.term))}`);
+    el.innerHTML = '<b>自動で決まった正解</b>：' + (items.length ? items.join('　／　') : '（空欄がまだありません）');
+  });
+  $('#countStat').textContent = `マークシート${C.answers.length}問 ・ 記述${C.written.length}問 ・ ${C.total}点`;
+  updateStatus();
+}
+function fitPreview() {
+  const sheet = $('#sheetHost .sheet'); if (!sheet) return;
+  const avail = $('#preview').clientWidth - 24, full = 793.7;
+  sheet.style.zoom = Math.min(1, avail / full);
+}
+function updateStatus() {
+  $('#saveStat').textContent = saveFailed ? '⚠ 自動保存できません。必ずバックアップ保存を' : (store.savedAt ? `自動保存 ${fmtTime(store.savedAt)}` : '');
+  const b = $('#bkBadge'), dirty = store.lastChangeAt > (store.lastBackupAt || 0);
+  b.className = 'badge-bk' + (dirty || !store.lastBackupAt ? ' dirty' : '');
+  b.textContent = !store.lastBackupAt ? 'バックアップ未実施' : (dirty ? `未バックアップの変更あり（前回 ${fmtTime(store.lastBackupAt)}）` : `バックアップ済 ${fmtTime(store.lastBackupAt)}`);
+}
+
+/* ---- テスト一覧・各ボタン ---- */
+function renderExamSel() {
+  const sel = $('#examSel'); sel.replaceChildren(...store.exams.map(e => h('option', { value: e.id }, e.name))); sel.value = store.current;
+}
+function renderAll() { renderExamSel(); renderEditor(); }
+
+function doPrint() {
+  const ft = esc(cur().meta.footer || '');
+  $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}</td></tr></tbody></table><div class="pfoot">${ft}</div>`;
+  const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' : '_正答一覧');
+  window.print(); document.title = old;
+}
+function setupButtons() {
+  $('#examSel').addEventListener('change', e => { store.current = e.target.value; saveStore(); renderAll(); });
+  $('#bNew').onclick = () => {
+    const name = prompt('新しいテストの名前（例：R8 2学期中間 1学年）', ''); if (name === null) return;
+    const ex = newExam(name.trim() || '新しいテスト', cur().meta); ex.meta.date = '';
+    store.exams.push(ex); store.current = ex.id; saveStore(); renderAll(); toast('作成しました（体裁の設定は今のテストを引き継いでいます）');
+  };
+  $('#bDup').onclick = () => {
+    const name = prompt('コピー後の名前', cur().name + ' のコピー'); if (name === null) return;
+    const c = clone(cur()); c.id = uid(); c.name = name.trim() || c.name; c.updatedAt = Date.now();
+    c.sections.forEach(s => { s.id = uid(); s.seed = Math.floor(Math.random() * 1e9); (s.items || []).forEach(it => it.id = uid()); });
+    store.exams.push(c); store.current = c.id; store.lastChangeAt = Date.now(); saveStore(); renderAll(); toast('複製しました');
+  };
+  $('#bRen').onclick = () => { const n = prompt('テストの名前', cur().name); if (n === null || !n.trim()) return; cur().name = n.trim(); touch(); renderExamSel(); };
+  $('#bDel').onclick = () => {
+    if (store.exams.length <= 1) { alert('最後の1件は削除できません。'); return; }
+    if (!confirm(`「${cur().name}」を削除しますか？\n（直前の状態は「履歴」に残ります）`)) return;
+    snapshot(true, '削除前'); store.exams = store.exams.filter(e => e.id !== store.current); store.current = store.exams[0].id; store.lastChangeAt = Date.now(); saveStore(); renderAll();
+  };
+  $('#bBackup').onclick = exportBackup; $('#bkBadge').onclick = exportBackup;
+  $('#bLoad').onclick = () => $('#fileIn').click();
+  $('#fileIn').onchange = e => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ''; };
+  $('#dictIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const fr = new FileReader();
+    fr.onload = () => { try { const d = JSON.parse(fr.result); const w = d.words || d.userDict; if (!w) throw new Error('辞書ではありません'); let n = 0; Object.keys(w).forEach(k => { if (!(k in store.userDict)) { store.userDict[k] = w[k]; n++; } }); dictChanged(); toast(`${n}語を追加しました`); if ($('#dlgRuby').open) openRubyDialog(); } catch (er) { alert('読み込めませんでした: ' + er.message); } };
+    fr.readAsText(f); };
+  $('#bHist').onclick = openHistory;
+  $('#bHelp').onclick = () => { $('#helpBody').innerHTML = helpHTML(); $('#dlgHelp').showModal(); };
+  $('#bWord').onclick = () => withEngine(() => { try { download(buildDocx(compile(cur())), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました'); } catch (e) { alert('Word出力に失敗しました: ' + e.message); } });
+  $('#bPrint').onclick = () => withEngine(() => { refresh(); doPrint(); });
+  $('#bCsv').onclick = () => { download(new Blob([buildCSV(compile(cur()))], { type: 'text/csv' }), `${safeName(cur().name)}_正答.csv`); };
+  $('#bKeyJson').onclick = () => { const ex = cur(); download(new Blob([JSON.stringify(buildKeyJSON(compile(ex), ex), null, 1)], { type: 'application/json' }), `${safeName(ex.name)}_採点用.json`); toast('採点アプリ用の正答ファイルを書き出しました'); };
+  document.querySelectorAll('.ptab').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; document.querySelectorAll('.ptab').forEach(x => x.classList.toggle('on', x === b)); refresh(); });
+  window.addEventListener('resize', fitPreview);
+  window.addEventListener('beforeunload', () => { clearTimeout(_saveT); saveStore(); });
+}
+
+function openHistory() {
+  const body = $('#histBody');
+  if (!store.snaps.length) body.innerHTML = '<p>まだ履歴がありません。編集すると自動で残ります。</p>';
+  else {
+    body.innerHTML = '<table class="hist"><tr><th>日時</th><th>テスト名</th><th>内容</th><th></th></tr>' + store.snaps.map((s, i) =>
+      `<tr><td>${fmtTime(s.t)}</td><td>${esc(s.exam.name)}</td><td>${esc(s.label)}・大問${s.exam.sections.length}</td><td><button class="btn small" data-i="${i}">新しいテストとして復元</button></td></tr>`).join('') + '</table>';
+    body.querySelectorAll('button[data-i]').forEach(b => b.onclick = () => {
+      const s = store.snaps[b.dataset.i], c = migrate(clone(s.exam)); c.id = uid(); c.name = c.name + `（復元 ${fmtTime(s.t)}）`;
+      store.exams.push(c); store.current = c.id; store.lastChangeAt = Date.now(); saveStore(); $('#dlgHist').close(); renderAll(); toast('復元しました');
+    });
+  }
+  $('#dlgHist').showModal();
+}
+
+function helpHTML() {
+  return `<h2>使い方・引き継ぎメモ</h2>
+<h4>基本の流れ</h4>
+<ul><li>左で大問を作る（語群選択／選択問題／正誤／記述）。右にその場で用紙が出ます。</li>
+<li>番号（１）（２）…・記号（ア）（イ）…・正答は<b>すべて自動</b>です。問題の順番を入れ替えても番号は付け直されます。</li>
+<li>「Word出力」→ 細かい手直しをしたいとき／「印刷／PDF」→ そのまま印刷・PDF保存／「正答CSV」→ 採点用の正答表。</li>
+<li>画面の「確認してください」に出る警告（正解の未設定・選択肢数オーバーなど）を消してから出力します。</li></ul>
+<h4>語群選択の書き方</h4>
+<ul><li>本文の空欄にしたい語句を選んで「選択した語句を空欄にする」。<code>{{語句}}</code> と書いても同じです。</li>
+<li>語群は「正解の語句＋ダミー」から自動で作られます。ダミーは別の欄に1行ずつ。</li>
+<li>同じ空欄を文中でもう一度出すときは「同じ空欄をもう一度使う」（<code>{{@語句}}</code>）。</li></ul>
+<h4>ルビ・フォント</h4>
+<ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
+<li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
+<li>「漢字すべてに自動でルビ」をオンにすると、手で付けていない漢字にも自動で読みが付きます（同じフォルダの <code>ruby-engine.js</code> が必要）。優先順位は ①手で付けたルビ ②登録した辞書 ③自動 です。</li>
+<li>自動の読みは完全ではありません（「行った」「進数」など）。出力前に「ルビの確認・辞書」で一覧を見て、直した読みは登録しておくと次回以降も使われます。辞書はバックアップにも入ります。</li>
+<li>フォントは基本設定で選びます。教科書体は「UD デジタル 教科書体」（Windows10以降に標準搭載）。入っていないパソコンではWord／印刷とも別の字体になります。</li></ul>
+<h4>バックアップ</h4>
+<ul><li>自動保存はこのブラウザの中だけです（履歴は10分ごと・40件）。</li>
+<li><b>学期ごと・大きく編集したあとに「バックアップ保存」</b>→ JSONファイルをGoogleドライブ等に置いてください。別のパソコンでも「読み込み」で再開できます。</li>
+<li>読み込みは「新しいテストとして追加」なので、今のデータは上書きされません。</li>
+<li>次の学期は「複製」から始めると、設定と問題の形をそのまま使えます。</li></ul>
+<h4>引き継ぎ担当者向け</h4>
+<ul><li>基本はこのHTML1ファイルだけで動きます（Chrome／Edge推奨・ネット不要）。自動ルビだけ、同じフォルダの <code>ruby-engine.js</code>（kuromoji＋IPAdic辞書、約24MB）を使います。これが無くても他の機能は動きます。作り直し方は tools/build-ruby-engine.js の先頭に書いてあります。</li>
+<li>先頭のコメントに構成が書いてあります。計算は <code>compile()</code>、見た目は <code>renderPaperHTML()</code>（画面・印刷）と <code>buildDocx()</code>（Word）。</li>
+<li>データの形を変えるときは <code>SCHEMA</code> を上げて <code>migrate()</code> に補完処理を書くと、古いバックアップも読めます。</li>
+<li>フォントはWord側にインストールされていないと別の字体で表示されます（BIZ UDフォントはWindows10以降に標準搭載）。</li></ul>`;
+}
+
+/* ---- 自動ルビ：辞書エンジン(ruby-engine.js)の読み込み ---- */
+let engState = 'idle';        // idle | loadingScript | loadingDict | ready | missing | error
+const engWaiters = [];
+const needEngine = ex => !!(ex.meta.showRuby && ex.meta.autoRuby);
+function setRubyStat() {
+  const el = $('#rubyStat'); if (!el) return;
+  el.textContent = { loadingScript: '辞書を読み込み中…', loadingDict: '辞書を準備中…（数秒）', ready: '自動ルビ：準備完了',
+    missing: '⚠ ruby-engine.js が同じフォルダにないため、手入力と登録辞書のルビだけです', error: '⚠ 辞書の読み込みに失敗しました' }[engState] || '';
+  el.style.color = /^⚠/.test(el.textContent) ? 'var(--warn)' : '';
+}
+function ensureEngine(cb) {
+  if (window.RubyEngine && window.RubyEngine.ready) { engState = 'ready'; cb && cb(true); return; }
+  if (cb) engWaiters.push(cb);
+  const flush = ok => engWaiters.splice(0).forEach(f => f(ok));
+  if (engState === 'loadingScript' || engState === 'loadingDict') return;
+  if (engState === 'missing' || engState === 'error') { flush(false); return; }
+  const startDict = () => {
+    engState = 'loadingDict'; setRubyStat();
+    window.RubyEngine.load(err => { engState = err ? 'error' : 'ready'; AUTO_CACHE.clear(); setRubyStat(); flush(!err); refreshSoon(); });
+  };
+  if (window.RubyEngine) { startDict(); return; }
+  engState = 'loadingScript'; setRubyStat();
+  const sc = document.createElement('script'); sc.src = 'ruby-engine.js';
+  sc.onload = startDict; sc.onerror = () => { engState = 'missing'; setRubyStat(); flush(false); refreshSoon(); };
+  document.head.append(sc);
+}
+/* 出力の前に辞書の準備を待つ */
+function withEngine(fn) {
+  const ex = cur();
+  if (!needEngine(ex) || engState === 'ready') { fn(); return; }
+  const ask = () => { if (confirm('自動ルビ用の辞書（ruby-engine.js）が使えません。\n手入力と登録辞書のルビだけで出力しますか？')) fn(); };
+  if (engState === 'missing' || engState === 'error') { ask(); return; }
+  toast('ルビ辞書を読み込み中です。少しお待ちください…');
+  ensureEngine(ok => ok ? fn() : ask());
+}
+
+/* ---- ルビの確認・辞書ダイアログ ---- */
+function collectRubyWords() {
+  const ex = cur(), keep = { RUBY, AUTO };
+  AUTO_CACHE.clear(); RUBY_LOG = new Map();
+  try { renderPaperHTML(compile(ex), true); } finally { var log = RUBY_LOG; RUBY_LOG = null; RUBY = keep.RUBY; AUTO = keep.AUTO; AUTO_CACHE.clear(); }
+  return log;
+}
+function dictChanged() { store.lastChangeAt = Date.now(); AUTO_CACHE.clear(); saveSoon(); refreshSoon(); }
+let rubyTab = 'words';
+function openRubyDialog() {
+  const dlg = $('#dlgRuby');
+  const draw = () => {
+    const body = h('div', { class: 'dlg' });
+    const tabs = h('div', { class: 'row', style: 'margin-bottom:8px' },
+      h('button', { type: 'button', class: 'ptab' + (rubyTab === 'words' ? ' on' : ''), onclick: () => { rubyTab = 'words'; draw(); } }, 'このテストの語句'),
+      h('button', { type: 'button', class: 'ptab' + (rubyTab === 'dict' ? ' on' : ''), onclick: () => { rubyTab = 'dict'; draw(); } }, `登録した辞書（${Object.keys(store.userDict).length}語）`),
+      h('span', { class: 'spacer' }), h('button', { type: 'button', class: 'btn', onclick: () => dlg.close() }, '閉じる'));
+    body.append(h('h2', {}, 'ルビの確認・辞書'), tabs);
+    if (rubyTab === 'words') {
+      const log = collectRubyWords();
+      body.append(h('p', { class: 'hint' }, '漢字を含む語と、いま付く読みの一覧です。読みを直して Enter（または枠の外をクリック）で辞書に登録され、以後のテストでも同じ読みになります。空にして登録すると「ルビを付けない語」になります。'));
+      const bar = h('div', { class: 'row', style: 'margin-bottom:6px' });
+      const sel = h('select', {}, h('option', { value: 'all' }, 'すべて'), h('option', { value: 'auto' }, '未確認（自動の読み）のみ'), h('option', { value: 'none' }, '読みなしのみ'));
+      bar.append(sel, btn('自動の読みをすべて確定して登録', () => {
+        let n = 0; log.forEach((v, k) => { if (v.src === 'auto' && v.reading) { store.userDict[k] = v.reading; n++; } });
+        dictChanged(); draw(); toast(`${n}語を登録しました`);
+      }, '今表示されている自動の読みを、そのまま辞書へ登録します'));
+      body.append(bar);
+      const tb = h('table', { class: 'hist' }, h('tr', {}, h('th', {}, '語'), h('th', {}, '読み'), h('th', {}, '状態'), h('th', {}, '')));
+      log.forEach((v, word) => {
+        const inp = h('input', { type: 'text', style: 'width:100%;border:1px solid var(--line);border-radius:6px;padding:3px 6px' }); inp.value = v.reading;
+        const st = h('td', {}), ops = h('td', {});
+        const label = () => { const ud = word in store.userDict; st.textContent = ud ? (store.userDict[word] ? '登録済み' : 'ルビなし（登録）') : (v.src === 'std' ? '標準辞書' : inp.value ? '自動（未確認）' : '読みなし'); st.style.color = ud ? 'var(--ok)' : (inp.value ? 'var(--sub)' : 'var(--warn)'); tr.dataset.st = ud || v.src === 'std' ? 'dict' : (inp.value ? 'auto' : 'none'); };
+        const commit = () => { const val = hira(inp.value.trim()); store.userDict[word] = val; inp.value = val; dictChanged(); label(); };
+        inp.addEventListener('change', commit);
+        ops.append(btn('↺', () => { delete store.userDict[word]; dictChanged(); draw(); }, '登録を消して自動の読みに戻す'));
+        const tr = h('tr', {}, h('td', { style: 'font-weight:700;white-space:nowrap' }, word), h('td', {}, inp), st, ops);
+        label(); tb.append(tr);
+      });
+      sel.addEventListener('change', () => tb.querySelectorAll('tr[data-st]').forEach(tr => tr.style.display = (sel.value === 'all' || tr.dataset.st === sel.value) ? '' : 'none'));
+      body.append(tb);
+      if (!log.size) body.append(h('p', {}, '漢字を含む語がまだありません。'));
+    } else {
+      const q = h('input', { type: 'text', placeholder: '語を検索', style: 'border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-bottom:6px' });
+      const tb = h('table', { class: 'hist' }, h('tr', {}, h('th', {}, '語'), h('th', {}, '読み'), h('th', {}, '')));
+      const fill = () => { tb.querySelectorAll('tr.d').forEach(x => x.remove());
+        Object.keys(store.userDict).filter(k => k.includes(q.value)).sort().forEach(k => tb.append(h('tr', { class: 'd' }, h('td', { style: 'font-weight:700' }, k), h('td', {}, store.userDict[k] || '（ルビなし）'),
+          h('td', {}, btn('削除', () => { delete store.userDict[k]; dictChanged(); draw(); }, '', 'danger'))))); };
+      q.addEventListener('input', fill); fill();
+      body.append(h('div', { class: 'row', style: 'margin-bottom:6px' }, btn('辞書をファイルに保存', () => {
+          download(new Blob([JSON.stringify({ app: 'testmaker-dict', words: store.userDict }, null, 1)], { type: 'application/json' }), `ルビ辞書_${stamp()}.json`); }, '他の先生に渡す・別のPCで使うとき'),
+        btn('辞書ファイルを読み込む', () => $('#dictIn').click(), '足りない語だけ追加します（既存の登録は上書きしません）')),
+        h('p', { class: 'hint' }, '辞書は「バックアップ保存」にも含まれます。'), q, tb);
+    }
+    dlg.replaceChildren(body);
+  };
+  const run = () => { draw(); if (!dlg.open) dlg.showModal(); };
+  if (engState === 'ready' || engState === 'missing' || engState === 'error') run(); else { toast('辞書を準備しています…'); ensureEngine(run); }
+}
+
+/* ---- 起動 ---- */
+store = loadStore();
+setupButtons();
+renderAll();
+saveStore();
+</script>
+</body>
+</html>
