@@ -45,6 +45,10 @@
    大問ごとに図を入れられる(ファイル選択・貼り付け・ドラッグ)。置き場所は本文の上/下/右。
    画像の中身は store.images に1か所でまとめ、大問には id だけを持たせる(履歴で画像が増えないように)。→「画像(図)」の節
    Word出力にも入る(buildDocx の前に docxImages() で PNG/JPEG にそろえる。SVG と「白黒にする」は canvas で作り直す)。
+
+ ■ コードの欄(プログラム)
+   大問ごとに1つ。書いたとおりの字下げで、等幅の字(BIZ UDゴシック)・枠囲み・ルビなしで出す。行番号は付けても付けなくてもよい。
+   語群選択の大問では、コードの中の {{答え}} も本文と同じ空欄になる(番号は上から順。コードが「本文の前」ならコードが先)。→ codeOf / codeHTML / codeXml
 =====================================================================
 -->
 <style>
@@ -114,6 +118,8 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
 .copt input[type=text]{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .blankmap{font-size:13px;color:var(--sub);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin-top:6px;line-height:1.7}
 .blankmap b{color:var(--ink)}
+textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff;resize:vertical;
+  font-family:"BIZ UDGothic","BIZ UDゴシック","MS Gothic",monospace;line-height:1.6;white-space:pre;overflow-x:auto;tab-size:4}
 .card.drop{outline:3px dashed var(--accent);outline-offset:2px}
 .figed{display:flex;gap:10px;align-items:flex-start;border-top:1px solid #e3e8ee;padding-top:8px;margin-top:8px}
 .figed .thumb{width:96px;height:72px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:6px;flex:none}
@@ -175,6 +181,13 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
 .fig img.gray{filter:grayscale(1)}
 .fig figcaption{font-size:.92em;line-height:1.5;margin-top:1mm}
 .fig-miss{border:1.5px dashed #000;padding:6mm 2mm;font-size:.9em}
+.code{border:1.5px solid #000;padding:1.5mm 3mm;margin:2mm 0;font-size:.95em;line-height:1.7;break-inside:avoid;
+  font-family:"BIZ UDGothic","BIZ UDゴシック","MS Gothic","MS ゴシック",monospace}   /* 等幅の字(Wordは CODE_FONT) */
+.code .cl{display:flex;white-space:pre}
+.code .ln{flex:none;margin-right:3mm;padding-right:2mm;border-right:1px solid #000;text-align:right;white-space:pre}
+.code .ct{white-space:pre-wrap;word-break:break-all}
+.code .blank{font-family:inherit}
+.ruby-on .code{line-height:1.8}
 .figrow{display:flex;gap:4mm;align-items:flex-start}
 .figmain{flex:1;min-width:0}
 .figside{flex:none;display:flex;flex-direction:column;gap:3mm;margin-top:1mm}
@@ -302,8 +315,9 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 2;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 3;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
+                                        // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -322,6 +336,8 @@ const FONTS = [
   ['MS 明朝','"MS Mincho","MS 明朝",serif'],
 ];
 const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
+const CODE_POS = { before: '本文の前', after: '本文の後' };
+const CODE_FONT = 'BIZ UDゴシック';     // コードの欄の字(等幅。Windows10以降に標準搭載)。字の幅がそろうので字下げが崩れない
 const IMG_MAX = 1600;                    // 画像を読み込むときの長い辺の上限(px)。A4に印刷しても線がつぶれない程度。容量を抑えるため
 const TYPE_NAMES = { blank:'語群選択（空欄補充）', choice:'選択問題（問ごとの選択肢）', tf:'正誤問題', written:'記述問題' };
 
@@ -422,7 +438,8 @@ function newItem(type) {
 }
 function newSection(type) {
   // figures: [{id, img(store.images の id), caption(見出し), width(用紙の幅の%), gray(白黒にする)}]  figPos: above|below|right(本文の上/下/右)
-  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above' };
+  // code: null(コードの欄なし) または プログラムの文字列。codePos: before|after(本文の前/後)。codeLines: 行番号を付けるか
+  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above', code: null, codePos: 'before', codeLines: true };
   if (type === 'blank')   return { ...base, text: '', distract: '', order: 'shuffle', seed: Math.floor(Math.random()*1e9), manual: '',
                                   bankNote: '※　同じ語句を何度使っても良い。使わない語句もある。' };
   if (type === 'choice')  return { ...base, items: [newItem('choice')] };
@@ -445,6 +462,8 @@ function migrate(ex) {
     if (m.items) m.items = m.items.map(it => Object.assign(newItem(m.type) || {}, it, { id: it.id || uid() }));
     m.figures = (m.figures || []).filter(f => f && f.img).map(f => Object.assign({ id: uid(), caption: '', width: 50, gray: false }, f));
     if (!FIG_POS[m.figPos]) m.figPos = 'above';
+    if (typeof m.code !== 'string') m.code = null;
+    if (!CODE_POS[m.codePos]) m.codePos = 'before';
     return m;
   });
   return ex;
@@ -504,8 +523,20 @@ function sampleExam() {
   s1.lead = '〔図:情報の流れ〕は、コンピュータでの情報の流れを表したものです。';
   s1.figures = [{ id: uid(), img: 'sample-flow', caption: '情報の流れ', width: 30, gray: false }];
   s1.figPos = 'right';
-  ex.sections = [s1, s2, s3, s4, s5, s6];
+  const s7 = B('プログラミング（見本）', '上のプログラムを実行すると、１から{{10}}までの数を順にたした結果が表示されます。', '1\ninput\nsum\nrange', 707);
+  s7.lead = '次のプログラムについて、空欄に当てはまるものを語群の中から選びなさい。';
+  s7.code = 'total = 0\nfor i in range(1, {{11}}):\n    total = total + {{i}}\n{{print}}(total)';
+  s7.codePos = 'before';
+  ex.sections = [s1, s2, s3, s4, s5, s6, s7];
   return ex;
+}
+
+/* コードの欄：書いたとおりの行(空行・字下げもそのまま。タブは空白4つ)。中身が空なら出さない */
+function codeOf(s, tokLine) {
+  if (s.code == null || !s.code.trim()) return null;
+  const lines = s.code.replace(/\t/g, '    ').replace(/\s+$/, '').split(/\r?\n/).map(l => l.replace(/\s+$/, ''));
+  while (lines.length && !lines[0].trim()) lines.shift();
+  return { lines: lines.map(tokLine), ln: !!s.codeLines };
 }
 
 /* =====================================================================
@@ -536,6 +567,7 @@ function compile(exam) {
     const sec = { no: si + 1, id: s.id, type: s.type, title: (s.title || '').trim(), lead: fr(s.lead, si).trim(), notes: [], points: num(s.points, 0) };
     if (!sec.title) W(si, '見出しが空です');
     sec.figPos = FIG_POS[s.figPos] ? s.figPos : 'above';
+    sec.code = null; sec.codePos = CODE_POS[s.codePos] ? s.codePos : 'before';
     sec.figs = (s.figures || []).map(f => {
       fk++; C.figNo[f.id] = fk;
       const ok = !!getImg(f.img);
@@ -546,7 +578,7 @@ function compile(exam) {
     if (s.type === 'blank') {
       const raw = fr(s.text, si).replace(/｛/g, '{').replace(/｝/g, '}');
       const blanks = [], last = {};
-      sec.paras = raw.split(/\r?\n/).filter(l => l.trim()).map(line => {
+      const tokLine = line => {
         const toks = []; let pos = 0, mt; const re = /\{\{\s*(@?)([^{}]*?)\s*\}\}/g;
         while ((mt = re.exec(line))) {
           if (mt.index > pos) toks.push({ t: 'text', v: line.slice(pos, mt.index) });
@@ -561,7 +593,12 @@ function compile(exam) {
         if (pos < line.length) toks.push({ t: 'text', v: line.slice(pos) });
         if (/\{\{|\}\}/.test(toks.filter(t => t.t === 'text').map(t => t.v).join(''))) W(si, '空欄の括弧 {{ }} が正しく閉じていない行があります');
         return toks;
-      });
+      };
+      // 番号は上から順に付ける：コードの欄が「本文の前」ならコードが先
+      const codeFirst = s.code != null && s.codePos === 'before';
+      if (codeFirst) sec.code = codeOf(s, tokLine);
+      sec.paras = raw.split(/\r?\n/).filter(l => l.trim()).map(tokLine);
+      if (!codeFirst) sec.code = codeOf(s, tokLine);
       if (!blanks.length) W(si, '空欄がありません（{{語句}} で囲んで空欄にします）');
       const uniq = []; blanks.forEach(b => { if (!uniq.includes(b.term)) uniq.push(b.term); });
       const dis = (s.distract || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
@@ -622,6 +659,10 @@ function compile(exam) {
         return o;
       });
     }
+    if (s.type !== 'blank') {   // 語群のない大問では、コードの {{ }} は空欄にせず、そのまま出す
+      sec.code = codeOf(s, line => [{ t: 'text', v: line }]);
+      if (sec.code && /\{\{/.test(s.code)) W(si, 'コードの欄の {{ }} は、語群選択の大問でだけ空欄になります（この大問ではそのまま表示します）');
+    }
     C.sections.push(sec);
   });
   C.total = C.answers.reduce((a, b) => a + b.points, 0) + C.written.reduce((a, b) => a + b.points, 0);
@@ -636,6 +677,12 @@ function fontCss(name) { return (FONTS.find(f => f[0] === name) || FONTS[0])[1];
 function figHTML(f, side) {
   const im = f.ok ? `<img src="${imgURL(f.img)}" alt=""${f.gray ? ' class="gray"' : ''}>` : `<div class="fig-miss">（図${zen(f.no)}の画像がありません）</div>`;
   return `<figure class="fig"${side ? '' : ` style="width:calc(${f.width}% - 3mm)"`}>${im}<figcaption>図${zen(f.no)}${f.caption ? '　' + escR(f.caption) : ''}</figcaption></figure>`;
+}
+/* コードの欄：等幅の字・書いたとおりの字下げ・枠囲み・ルビなし */
+function codeHTML(cd) {
+  const w = String(cd.lines.length).length;
+  return '<div class="code">' + cd.lines.map((toks, i) =>
+    `<div class="cl">${cd.ln ? `<span class="ln">${String(i + 1).padStart(w, ' ')}</span>` : ''}<span class="ct">${toks.map(t => t.t === 'text' ? esc(t.v) : blankHTML(t)).join('') || ' '}</span></div>`).join('') + '</div>';
 }
 const figsHTML = F => `<div class="figs">${F.map(f => figHTML(f)).join('')}</div>`;
 const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
@@ -688,6 +735,7 @@ function renderPaperHTML(C, force) {
           `<div class="ansbox" style="height:${it.lines * 9}mm"></div></div>`;
       });
     }
+    if (sec.code) main = sec.codePos === 'before' ? codeHTML(sec.code) + main : main + codeHTML(sec.code);
     const F = sec.figs;
     if (!F.length) h += main + after;
     else if (sec.figPos === 'above') h += figsHTML(F) + main + after;
@@ -751,7 +799,9 @@ const X = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>
 let BOLD_FONT = null;
 function R(t, o = {}) {           // run
   let r = '';
-  if (o.b && BOLD_FONT) r += `<w:rFonts w:ascii="${X(BOLD_FONT)}" w:hAnsi="${X(BOLD_FONT)}" w:eastAsia="${X(BOLD_FONT)}" w:cs="${X(BOLD_FONT)}"/>`;
+  // hint="default"：" や ' を日本語の字形(全角の “ ”)にしない(既定は eastAsia。コードの欄で困るため)
+  if (o.font) r += `<w:rFonts w:ascii="${X(o.font)}" w:hAnsi="${X(o.font)}" w:eastAsia="${X(o.font)}" w:cs="${X(o.font)}" w:hint="default"/>`;
+  else if (o.b && BOLD_FONT) r += `<w:rFonts w:ascii="${X(BOLD_FONT)}" w:hAnsi="${X(BOLD_FONT)}" w:eastAsia="${X(BOLD_FONT)}" w:cs="${X(BOLD_FONT)}"/>`;
   if (o.b) r += '<w:b/><w:bCs/>';
   if (o.color) r += `<w:color w:val="${o.color}"/>`;
   if (o.spacing) r += `<w:spacing w:val="${o.spacing}"/>`;
@@ -850,6 +900,15 @@ function buildDocx(C, imgs = new Map()) {
   const body = [];
   // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
   const media = [], mediaOf = new Map(); let drawN = 0;
+  // コードの欄：枠線の表(1マス)に、1行を1段落で入れる。等幅の字なので字下げは空白のまま。行番号は桁をそろえて前に付ける
+  const codeXml = (cd, fw) => {
+    const dg = String(cd.lines.length).length, cs = sz - 1;
+    const ps = cd.lines.map((toks, i) => P([
+      ...(cd.ln ? [R(String(i + 1).padStart(dg, ' ') + '  ', { font: CODE_FONT, sz: cs })] : []),
+      ...toks.map(t => t.t === 'text' ? R(t.v, { font: CODE_FONT, sz: cs }) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true, sz: cs }))],
+      { line: 300, keepNext: i < cd.lines.length - 1, keepLines: true }));
+    return TBL([{ cells: [{ w: fw, xml: ps.join('') }] }], [fw], { grid: true, padV: 60, padH: 160 }) + SPACER(80);
+  };
   const figXml = (f, maxW) => {
     const cap = P(RR('図' + zen(f.no) + (f.caption ? '　' + f.caption : ''), { sz: sz - 1 }), { jc: 'center', line: 300, after: 60 });
     const im = imgs.get(docxImgKey(f));
@@ -925,6 +984,7 @@ function buildDocx(C, imgs = new Map()) {
           main.push(TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w, xml: P('') }] }], [w], { ind: IND - 110, grid: true }), SPACER(80));
         });
       }
+      if (sec.code) { const cx = codeXml(sec.code, fw); if (sec.codePos === 'before') main.unshift(cx); else main.push(cx); }
       return { main, after };
     };
     const F = sec.figs;
@@ -1140,7 +1200,7 @@ function insertFigRef(f) {
   const cap = plain(f.caption || '').trim();
   if (!cap) { toast('先に、この図の見出しを入れてください'); return; }
   const t = lastField;
-  if (!t || !document.contains(t) || t.classList.contains('figcap')) { toast('番号を入れたい入力欄（本文など）をクリックしてから押してください'); return; }
+  if (!t || !document.contains(t) || t.classList.contains('figcap') || t.classList.contains('codeta')) { toast('番号を入れたい入力欄（本文など）をクリックしてから押してください'); return; }
   const a = t.selectionStart ?? t.value.length, b = t.selectionEnd ?? a;
   t.value = t.value.slice(0, a) + `〔図:${cap}〕` + t.value.slice(b);
   t.dispatchEvent(new Event('input')); t.focus(); const p = a + cap.length + 4; t.setSelectionRange(p, p);
@@ -1417,7 +1477,7 @@ function sectionCard(s, i, ex) {
   card.addEventListener('drop', e => { card.classList.remove('drop'); if (e.dataTransfer.files.length) { e.preventDefault(); addFigures(s, e.dataTransfer.files); } });
   if (s.collapsed) return card;
 
-  const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })), figPanel(s));
+  const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })), figPanel(s), codePanel(s));
 
   if (s.type === 'blank') {
     const ta = bindText(s, 'text', { tag: 'textarea', rows: 9 });
@@ -1535,11 +1595,47 @@ function figPanel(s) {
   return box;
 }
 
+/* 大問のコードの欄(プログラム)：書いたとおりに等幅の字で出す。語群選択の大問では {{ }} で空欄にできる */
+function codePanel(s) {
+  if (s.code == null) return h('div', { class: 'row', style: 'margin:4px 0' },
+    btn('＋ コードの欄を追加', () => { s.code = ''; touch(); renderEditor(); }, 'プログラムを、書いたとおりの字下げで枠に入れて出します'));
+  const ta = h('textarea', { rows: 6, class: 'codeta', spellcheck: 'false', wrap: 'off', placeholder: '例）\ntotal = 0\nfor i in range(1, 11):\n    total = total + i' });
+  ta.value = s.code;
+  ta.addEventListener('input', () => { s.code = ta.value; touch(); });
+  ta.addEventListener('keydown', e => {   // Tab で字下げ(空白4つ)。ふつうは次の入力欄へ移ってしまうため
+    if (e.key !== 'Tab' || e.shiftKey) return;
+    e.preventDefault(); const a = ta.selectionStart, b = ta.selectionEnd;
+    ta.value = ta.value.slice(0, a) + '    ' + ta.value.slice(b); ta.setSelectionRange(a + 4, a + 4); s.code = ta.value; touch();
+  });
+  const toBlank = () => {
+    const a = ta.selectionStart, b = ta.selectionEnd;
+    if (a === b) { toast('コードの中で、空欄にしたい部分を選択してから押してください'); return; }
+    const sel = ta.value.slice(a, b);
+    if (/\n/.test(sel)) { toast('1行の中で選択してください'); return; }
+    ta.value = ta.value.slice(0, a) + '{{' + sel + '}}' + ta.value.slice(b);
+    s.code = ta.value; const p = a + 4 + sel.length; ta.setSelectionRange(p, p); ta.focus(); touch();
+  };
+  const ln = h('input', { type: 'checkbox' }); ln.checked = !!s.codeLines;
+  ln.addEventListener('change', () => { s.codeLines = ln.checked; touch(); });
+  return h('div', { class: 'sub' },
+    h('div', { class: 'qhead' }, h('b', {}, 'コードの欄（プログラム）'), h('span', { class: 'spacer' }),
+      h('label', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint', style: 'margin:0' }, '置き場所'), bindSelect(s, 'codePos', Object.entries(CODE_POS))),
+      h('label', { class: 'row', style: 'gap:4px' }, ln, '行番号'),
+      btn('コードの欄を消す', () => { if (s.code.trim() && !confirm('コードの欄を消しますか？\n（直前の状態は「履歴」に残ります）')) return; snapshot(true, 'コードの欄の削除前'); s.code = null; touch(); renderEditor(); }, '', 'danger')),
+    ta,
+    s.type === 'blank'
+      ? h('div', { class: 'row', style: 'margin-top:4px' },
+          h('button', { type: 'button', class: 'btn small primary', onmousedown: e => e.preventDefault(), onclick: toBlank }, '選択した部分を空欄にする'),
+          h('span', { class: 'hint', style: 'margin:0' }, '本文と同じく ', h('code', {}, '{{答え}}'), ' が空欄になり、番号・語群・正答が自動で付きます。'))
+      : h('div', { class: 'hint' }, '字下げは書いたとおりに出ます（Tab キーで空白4つ）。空欄 {{ }} を使えるのは、語群選択の大問だけです。'));
+}
+
 let lastField = null;
 document.addEventListener('focusin', e => { if (e.target.matches && e.target.matches('#editor input[type=text], #editor textarea')) lastField = e.target; });
 function addRuby() {
   const f = lastField;
   if (!f || !document.contains(f)) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
+  if (f.classList.contains('codeta')) { toast('コードの欄にはルビを付けられません（書いたとおりに出すため）'); return; }
   const a = f.selectionStart, b = f.selectionEnd;
   if (a == null || a === b) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
   const sel = f.value.slice(a, b);
@@ -1694,6 +1790,10 @@ function helpHTML() {
 <li>番号（図１・図２…）はテスト全体の通し番号で自動で付きます。本文で図を指すときは <code>〔図:見出し〕</code> と書くと、その図の番号に置き換わります。「本文に番号を入れる」を押すと、クリックしておいた入力欄に入ります。</li>
 <li>白黒で印刷するので、色の付いた図は「白黒にする」で見え方を確かめておくと安心です。</li>
 <li>大きな画像は、読み込むときに自動で小さくします。図は、印刷／PDF にも Word 出力にも入ります。</li></ul>
+<h4>コードの欄（プログラム）</h4>
+<ul><li>大問の「＋ コードの欄を追加」で、プログラムを書く欄が出ます。字下げは書いたとおりに、字の幅がそろった字体で、枠に囲んで出ます（Tab キーで空白4つ）。</li>
+<li>語群選択の大問では、コードの中も <code>{{答え}}</code> で空欄にできます（「選択した部分を空欄にする」）。番号・語群・正答は本文と同じく自動で付きます。</li>
+<li>置き場所（本文の前／後）と、行番号を付けるかを選べます。コードの欄にはルビは付きません。</li></ul>
 <h4>ルビ・フォント</h4>
 <ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
 <li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
