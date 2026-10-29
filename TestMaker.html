@@ -201,9 +201,12 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .ci-box{display:flex;align-items:center;justify-content:center;padding:1mm 0 1mm 1.8em}
 .ci-box img{max-width:100%;max-height:100%;object-fit:contain}
 .ci-t{line-height:1.5;margin-top:.5mm}
-.figrow{display:flex;gap:4mm;align-items:flex-start}
-.figmain{flex:1;min-width:0}
-.figside{flex:none;display:flex;flex-direction:column;gap:3mm;margin-top:1mm}
+.figrow{display:flow-root}
+/* 右の図：横並び(flex)だと印刷でページをまたげず、大問がまるごと次のページに送られたので、回り込み(float)にした。
+   本文は flow-root で図の左の列にまとめる(Word の2列の表と同じ見た目) */
+.figside{float:right;margin:1mm 0 1mm 4mm}
+.figside .fig+.fig{margin-top:3mm}
+.figmain{display:flow-root}
 .ruby-on .fig figcaption{line-height:2}
 .sheet .pt{font-size:.85em;margin-left:.5em}
 .sheet ruby rt{font-size:.55em;font-weight:400;line-height:1}
@@ -919,7 +922,7 @@ function qWrap(it, q, rest) {
   if (!F.length) return `<div class="q">${q}${rest}</div>`;
   if (it.figPos === 'below') return `<div class="q">${q}${figsHTML(F)}${rest}</div>`;
   const w = Math.min(60, Math.max(20, ...F.map(f => f.width)));
-  return `<div class="q"><div class="figrow"><div class="figmain">${q}${rest}</div><div class="figside" style="width:${w}%">${F.map(f => figHTML(f, true)).join('')}</div></div></div>`;
+  return `<div class="q"><div class="figrow"><div class="figside" style="width:${w}%">${F.map(f => figHTML(f, true)).join('')}</div><div class="figmain">${q}${rest}</div></div></div>`;
 }
 const figsHTML = F => `<div class="figs">${F.map(f => figHTML(f)).join('')}</div>`;
 const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
@@ -980,7 +983,7 @@ function renderPaperHTML(C, force) {
     else if (sec.figPos === 'below') h += main + figsHTML(F) + after;
     else {   // 右：左に本文、右に図を縦に並べる。右の列の幅は、いちばん大きい図の幅(%)
       const w = Math.min(60, Math.max(20, ...F.map(f => f.width)));
-      h += `<div class="figrow"><div class="figmain">${main}</div><div class="figside" style="width:${w}%">${F.map(f => figHTML(f, true)).join('')}</div></div>` + after;
+      h += `<div class="figrow"><div class="figside" style="width:${w}%">${F.map(f => figHTML(f, true)).join('')}</div><div class="figmain">${main}</div></div>` + after;
     }
     h += '</section>';
   });
