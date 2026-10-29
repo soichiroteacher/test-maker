@@ -45,6 +45,7 @@
  ■ 図(画像)
    大問ごとに図を入れられる(ファイル選択・貼り付け・ドラッグ)。置き場所は本文の上/下/右。
    設問(選択・正誤・記述の1問ずつ)にも図を入れられる。置き場所は問題文の下/右。番号は用紙に出る順の通し番号。
+   選択肢も図にできる(choices は {text, img})。図は同じ高さの枠にそろえて並べる(choiceCols・choiceH)。
    画像の中身は store.images に1か所でまとめ、大問には id だけを持たせる(履歴で画像が増えないように)。→「画像(図)」の節
    Word出力にも入る(buildDocx の前に docxImages() で PNG/JPEG にそろえる。SVG と「白黒にする」は canvas で作り直す)。
 
@@ -117,6 +118,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
 .qno{font-weight:700;color:#264b87}
 .copt{display:flex;gap:6px;align-items:center;margin:3px 0}
 .copt .lab{width:1.8em;text-align:center;font-weight:700}
+.copt .cthumb{width:44px;height:32px;object-fit:contain;border:1px solid var(--line);border-radius:4px;background:#fff}
 .copt input[type=text]{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .blankmap{font-size:13px;color:var(--sub);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin-top:6px;line-height:1.7}
 .blankmap b{color:var(--ink)}
@@ -193,6 +195,12 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .ruby-on .code{line-height:1.8}
 .blocks{margin:2mm 0;break-inside:avoid}
 .blocks svg{display:block;max-width:100%;height:auto}
+.q-ci{display:grid;gap:2mm 4mm;margin-top:1mm}
+.ci{position:relative;break-inside:avoid;text-align:center}
+.ci .lab{position:absolute;left:0;top:0;z-index:1;background:#fff}
+.ci-box{display:flex;align-items:center;justify-content:center;padding:1mm 0 1mm 1.8em}
+.ci-box img{max-width:100%;max-height:100%;object-fit:contain}
+.ci-t{line-height:1.5;margin-top:.5mm}
 .figrow{display:flex;gap:4mm;align-items:flex-start}
 .figmain{flex:1;min-width:0}
 .figside{flex:none;display:flex;flex-direction:column;gap:3mm;margin-top:1mm}
@@ -320,11 +328,12 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 5;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 6;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
                                         // 5(2026-10-29): コードの欄の種類(codeKind: text|blocks)とブロックの大きさ(blockScale)を追加
+                                        // 6(2026-10-29): 選択肢を文字列から {text, img} に(図の選択肢)。設問に choiceCols・choiceH
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -345,6 +354,7 @@ const FONTS = [
   ['MS 明朝','"MS Mincho","MS 明朝",serif'],
 ];
 const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
+const CHOICE_COLS = { auto: '自動', 1: '1列', 2: '2列', 4: '4列' };
 const ITEM_FIG_POS = { below: '問題文の下', right: '問題文の右' };
 const CODE_KIND = { text: '文字のコード', blocks: 'ブロック（MakeCode のような）' };
 const CODE_POS = { before: '本文の前', after: '本文の後' };
@@ -442,10 +452,12 @@ function newMeta() {
     footer: '本教材のすべての権利は作成者が保有しています。本教材の内容は無断で複製、配布、転載することを禁じます。'
   };
 }
+const newChoice = (text = '') => ({ text, img: null });
 // 設問の図：figures は大問と同じ形。figPos: below|right(問題文の下/右)
 function newItem(type) {
   const f = { figures: [], figPos: 'below' };
-  if (type === 'choice')  return { id: uid(), text: '', choices: ['','','',''], correct: 0, ...f };
+  // 選択肢：{text, img(store.images の id か null)}。choiceCols: 図の選択肢の並べ方(auto|1|2|4)、choiceH: 図の枠の高さ(mm)
+  if (type === 'choice')  return { id: uid(), text: '', choices: [newChoice(), newChoice(), newChoice(), newChoice()], correct: 0, choiceCols: 'auto', choiceH: 30, ...f };
   if (type === 'tf')      return { id: uid(), text: '', correct: 0, ...f };          // 0=正しい 1=間違い
   if (type === 'written') return { id: uid(), text: '', answer: '', lines: 3, points: 3, ...f };
 }
@@ -477,6 +489,8 @@ function migrate(ex) {
     if (m.items) m.items = m.items.map(it => {
       const o = Object.assign(newItem(m.type) || {}, it, { id: it.id || uid() });
       o.figures = figs(o.figures); if (!ITEM_FIG_POS[o.figPos]) o.figPos = 'below';
+      if (o.choices) o.choices = o.choices.map(c => typeof c === 'string' ? newChoice(c) : Object.assign(newChoice(), c));   // schema 5 までは文字列
+      if (o.choices && !CHOICE_COLS[o.choiceCols]) o.choiceCols = 'auto';
       return o;
     });
     m.figures = figs(m.figures);
@@ -745,7 +759,7 @@ function compile(exam) {
       if (capNo[cap]) W(si, `図の見出し「${cap}」が2つあります。〔図:${cap}〕は前の方の図を指します`); else capNo[cap] = fc;
     });
   });
-  C.figs = [];
+  C.figs = []; C.cimgs = [];   // cimgs = 選択肢の画像(Word 用に集める)
   const mkFigs = (list, si) => (list || []).map(f => {
     const no = figNo[f.id]; C.figNo[f.id] = no;
     const ok = !!getImg(f.img);
@@ -817,16 +831,28 @@ function compile(exam) {
       sec.items = (s.items || []).map(it => {
         n++; C.itemNo[it.id] = n;
         const keep = []; let corr = -1;
-        (it.choices || []).forEach((c, i) => { if (String(c).trim()) { if (i === it.correct) corr = keep.length; keep.push(fr(c, si).trim()); } });
+        (it.choices || []).forEach((c, i) => {
+          const t = fr(c.text, si).trim();
+          if (t || c.img) { if (i === it.correct) corr = keep.length; keep.push({ text: t, img: c.img || null }); }
+        });
         if (!String(it.text || '').trim()) W(si, `（${n}）の問題文が空です`);
         if (keep.length < 2) W(si, `（${n}）の選択肢が2つ未満です`);
         if (keep.length > L.length) W(si, `（${n}）の選択肢が多すぎます`);
         else if (maxC && keep.length > maxC) W(si, `（${n}）の選択肢数がマークシートの最大(${maxC})を超えています`);
         if (corr < 0) W(si, `（${n}）の正解が選ばれていません（空の選択肢が正解になっていないか確認）`);
-        else C.answers.push({ no: n, label: L[corr], text: keep[corr], points: sec.points, sec: sec.no });
-        const vmax = Math.max(0, ...keep.map(vlen));
-        const cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
-        return { id: it.id, n, text: fr(it.text, si).trim(), ...itemFigs(it, si), cols: Math.max(1, cols), choices: keep.map((t, i) => ({ label: L[i] || '？', text: t })) };
+        // 図だけの選択肢は、正答の文字を「（図）」として渡す(採点アプリは表示に使うだけ)
+        else C.answers.push({ no: n, label: L[corr], text: keep[corr].text || '（図）', points: sec.points, sec: sec.no });
+        const imgMode = keep.some(c => c.img);
+        let cols;
+        if (imgMode) {   // 図の選択肢：自動なら4つまで2×2、6つまで3列、それより多いと4列
+          cols = it.choiceCols === 'auto' || !CHOICE_COLS[it.choiceCols] ? (keep.length <= 4 ? 2 : keep.length <= 6 ? 3 : 4) : Number(it.choiceCols);
+          keep.forEach((c, i) => { if (c.img) { c.ok = !!getImg(c.img); if (!c.ok) W(si, `（${n}）の選択肢「${L[i]}」の画像が見つかりません`); else C.cimgs.push({ img: c.img, gray: false, ok: true }); } });
+        } else {
+          const vmax = Math.max(0, ...keep.map(c => vlen(c.text)));
+          cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
+        }
+        return { id: it.id, n, text: fr(it.text, si).trim(), ...itemFigs(it, si), cols: Math.max(1, cols), imgMode,
+          choiceH: Math.min(80, Math.max(10, num(it.choiceH, 30))), choices: keep.map((c, i) => ({ label: L[i] || '？', ...c })) };
       });
     }
 
@@ -880,6 +906,13 @@ function codeHTML(cd) {
   return '<div class="code">' + cd.lines.map((toks, i) =>
     `<div class="cl">${cd.ln ? `<span class="ln">${String(i + 1).padStart(w, ' ')}</span>` : ''}<span class="ct">${toks.map(t => t.t === 'text' ? esc(t.v) : blankHTML(t)).join('') || ' '}</span></div>`).join('') + '</div>';
 }
+/* 図の選択肢：同じ高さの枠に図を入れてそろえる(縦長・横長がまざっても列がずれない)。記号は左上、文字は図の下 */
+function choiceImgsHTML(it) {
+  return `<div class="q-ci" style="grid-template-columns:repeat(${it.cols},1fr)">` + it.choices.map(c =>
+    `<div class="ci"><span class="lab">${escR(c.label)}</span><div class="ci-box" style="height:${it.choiceH}mm">` +
+    (c.img ? (c.ok ? `<img src="${imgURL(c.img)}" alt="">` : '<span class="fig-miss">（画像がありません）</span>') : escR(c.text)) + '</div>' +   // 図のない選択肢は、文字を枠の中に
+    (c.img && c.text ? `<div class="ci-t">${escR(c.text)}</div>` : '') + '</div>').join('') + '</div>';
+}
 /* 設問1つ：q = 問題文、rest = 選択肢・解答欄。図は問題文の下(選択肢の上)か、右 */
 function qWrap(it, q, rest) {
   const F = it.figs;
@@ -925,6 +958,7 @@ function renderPaperHTML(C, force) {
     else if (sec.type === 'choice') {
       sec.items.forEach(it => {
         main += qWrap(it, `<div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>`,
+          it.imgMode ? choiceImgsHTML(it) :
           `<div class="q-c" style="grid-template-columns:repeat(${it.cols},auto)">` +
           it.choices.map(c => `<div><span class="lab">${escR(c.label)}</span>${escR(c.text)}</div>`).join('') + '</div>');
       });
@@ -1074,7 +1108,7 @@ async function docxImages(C) {
   for (const sec of C.sections) if (sec.code && sec.code.kind === 'blocks') {
     try { out.set(sec.code.key, await blocksPng(sec.code, C.meta, 3)); } catch (e) { console.warn(e); }
   }
-  for (const f of C.figs || []) {
+  for (const f of [...(C.figs || []), ...(C.cimgs || [])]) {
     const key = docxImgKey(f); if (!f.ok || out.has(key)) continue;
     const im = getImg(f.img);
     try {
@@ -1145,6 +1179,18 @@ function buildDocx(C, imgs = new Map()) {
     if (it.figPos === 'below') return qOf(fw) + figsRowXml(it.figs, fw - IND) + restOf(fw);
     return figRightXml(it.figs, fw, w => qOf(w) + restOf(w)) + SPACER(60);
   };
+  // 図の選択肢1つ：記号 → 図(マスの幅と枠の高さに入るよう縮める) → 文字。1mm = 56.7 twip
+  const choiceImgXml = (c, maxW, hmm) => {
+    const im = c.img && imgs.get(docxImgKey({ img: c.img, gray: false }));
+    const maxH = Math.round(hmm * 56.7);
+    let pic = P('', { jc: 'center', keepNext: true });
+    if (im) {
+      const k = Math.min(maxW / im.w, maxH / im.h), w = Math.round(im.w * k), h = Math.round(im.h * k);
+      pic = P(drawingXml(mediaFor(im).rid, w * 635, h * 635, ++drawN), { jc: 'center', keepNext: true });
+    } else if (c.img) pic = P(R('（画像がありません）'), { jc: 'center', box: true, keepNext: true });
+    else if (c.text) return P([lab(c.label)], { keepNext: true, line: 300 }) + P(RR(c.text), { jc: 'center', line: 330, after: 40 });   // 図のない選択肢は文字だけ
+    return P([lab(c.label)], { keepNext: true, line: 300 }) + pic + (c.text ? P(RR(c.text), { jc: 'center', line: 300, after: 40 }) : P('', { after: 40 }));
+  };
   const figXml = (f, maxW) => {
     const cap = P(RR('図' + zen(f.no) + (f.caption ? '　' + f.caption : ''), { sz: sz - 1 }), { jc: 'center', line: 300, after: 60 });
     const im = imgs.get(docxImgKey(f));
@@ -1202,7 +1248,7 @@ function buildDocx(C, imgs = new Map()) {
             const cols = it.cols, avail = w - IND, cw = Math.floor(avail / cols);
             const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
             const rows = chunk(it.choices, cols).map(ln => {
-              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
+              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: it.imgMode ? choiceImgXml(c, grid[ci] - 220, it.choiceH) : P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
               for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
               return { cells };
             });
@@ -1380,7 +1426,7 @@ const imgId = d => 'i' + hash32(d).toString(36) + hash32(d.slice(d.length >> 1) 
 function addImage(rec) { const id = imgId(rec.data); if (!store.images[id]) { store.images[id] = rec; imgsDirty = true; } return id; }
 function usedImageIds(exams, snaps) {
   const u = new Set(), addF = list => (list || []).forEach(f => u.add(f.img));
-  const add = ex => (ex.sections || []).forEach(s => { addF(s.figures); (s.items || []).forEach(it => addF(it.figures)); });
+  const add = ex => (ex.sections || []).forEach(s => { addF(s.figures); (s.items || []).forEach(it => { addF(it.figures); addF((it.choices || []).filter(c => c && c.img)); }); });
   exams.forEach(add); (snaps || []).forEach(sn => add(sn.exam));
   return u;
 }
@@ -1416,6 +1462,11 @@ async function loadImageFile(file) {
   let type = jpeg ? 'image/jpeg' : 'image/png', data = cv.toDataURL(type, 0.88);
   if (!jpeg && data.length > 1.2e6) { const j = cv.toDataURL('image/jpeg', 0.9); if (j.length < data.length / 2) { data = j; type = 'image/jpeg'; } }
   return { data, w, h, type };
+}
+async function setChoiceImg(c, file) {   // 選択肢を図にする
+  if (!/^image\//.test(file.type)) { toast('画像のファイル（PNG・JPEG など）を選んでください'); return; }
+  try { c.img = addImage(await loadImageFile(file)); touch(); renderEditor(); toast('選択肢を図にしました'); }
+  catch (e) { alert(`画像を読み込めませんでした。\n${e.message}\n\nPNG や JPEG の画像を選んでください。`); }
 }
 async function addFigures(s, files) {
   const list = [...files].filter(f => /^image\//.test(f.type));
@@ -1758,12 +1809,27 @@ function sectionCard(s, i, ex) {
       it.choices.forEach((c, ci) => {
         const rb = h('input', { type: 'radio', name: 'r_' + it.id, title: '正解' }); rb.checked = it.correct === ci;
         rb.addEventListener('change', () => { it.correct = ci; touch(); });
-        const inp = h('input', { type: 'text', placeholder: '選択肢' }); inp.value = c;
-        inp.addEventListener('input', () => { it.choices[ci] = inp.value; touch(); });
-        box.append(h('div', { class: 'copt' }, h('span', { class: 'lab' }, L[ci] || '？'), rb, inp,
-          btn('✕', () => { it.choices.splice(ci, 1); if (it.correct === ci) it.correct = 0; else if (it.correct > ci) it.correct--; touch(); renderEditor(); }, 'この選択肢を消す')));
+        const inp = h('input', { type: 'text', placeholder: c.img ? '図の下の文字（なくてもよい）' : '選択肢' }); inp.value = c.text;
+        inp.addEventListener('input', () => { c.text = inp.value; touch(); });
+        // 選択肢の画像：「画像」ボタン、または選択肢の欄で貼り付け(Ctrl+V)。設問の図にはしない
+        const fileIn = h('input', { type: 'file', accept: 'image/*', hidden: true });
+        fileIn.addEventListener('change', () => { const f = fileIn.files[0]; fileIn.value = ''; if (f) setChoiceImg(c, f); });
+        const row = h('div', { class: 'copt' }, h('span', { class: 'lab' }, L[ci] || '？'), rb,
+          c.img ? h('img', { class: 'cthumb', src: imgURL(c.img), alt: '' }) : null, inp,
+          c.img ? btn('画像を外す', () => { c.img = null; touch(); renderEditor(); }, 'この選択肢の画像を外します（文字は残ります）')
+                : btn('画像', () => fileIn.click(), 'この選択肢を図にする（選択肢の欄で貼り付けても入ります）'), fileIn,
+          btn('✕', () => { it.choices.splice(ci, 1); if (it.correct === ci) it.correct = 0; else if (it.correct > ci) it.correct--; touch(); renderEditor(); }, 'この選択肢を消す'));
+        row.addEventListener('paste', e => {
+          const fs = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => /^image\//.test(f.type));
+          if (fs.length) { e.preventDefault(); e.stopPropagation(); setChoiceImg(c, fs[0]); }
+        });
+        box.append(row);
       });
-      box.append(btn('＋ 選択肢を追加', () => { it.choices.push(''); touch(); renderEditor(); }));
+      box.append(btn('＋ 選択肢を追加', () => { it.choices.push(newChoice()); touch(); renderEditor(); }));
+      if (it.choices.some(c => c.img)) box.append(h('div', { class: 'row', style: 'margin-top:4px' },
+        h('label', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint', style: 'margin:0' }, '図の選択肢の並べ方'), bindSelect(it, 'choiceCols', Object.entries(CHOICE_COLS))),
+        h('label', { class: 'row', style: 'gap:4px' }, '図の高さ', bindText(it, 'choiceH', { type: 'number', min: 10, max: 80, step: 5, cls: 'w5' }), 'mm'),
+        h('span', { class: 'hint', style: 'margin:0' }, '図は同じ高さの枠にそろえて並びます。')));
       card.append(itemBox(it, box));
     });
     card.append(btn('＋ 問題を追加', () => { s.items.push(newItem('choice')); touch(); renderEditor(); }));
@@ -2049,6 +2115,7 @@ function helpHTML() {
 <h4>図（画像）</h4>
 <ul><li>大問の「＋ 図を追加」で画像のファイルを選びます。<b>この大問の中で貼り付け（Ctrl+V）</b>や、画像をドラッグしても入ります（Scratch の画面のスクリーンショットなど）。</li>
 <li>置き場所は大問ごとに「本文の上／本文の下／本文の右」から選びます。大きさは用紙の幅に対する割合（%）です。</li>
+<li>選択問題の選択肢も図にできます（選択肢の横の「画像」、または選択肢の欄で貼り付け）。図は同じ高さの枠にそろえて並びます。並べ方（自動・1列・2列・4列）と図の高さ（mm）を選べます。文字を書くと図の下に出ます。</li>
 <li>選択・正誤・記述の問題は、1問ずつにも図を入れられます（「＋ この問題に図」。その問題の欄で貼り付けても入ります）。置き場所は「問題文の下／問題文の右」です。</li>
 <li>番号（図１・図２…）はテスト全体の通し番号で、用紙に出る順に自動で付きます。本文で図を指すときは <code>〔図:見出し〕</code> と書くと、その図の番号に置き換わります。「本文に番号を入れる」を押すと、クリックしておいた入力欄に入ります。</li>
 <li>白黒で印刷するので、色の付いた図は「白黒にする」で見え方を確かめておくと安心です。</li>
