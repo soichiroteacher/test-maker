@@ -18,10 +18,12 @@
    外部ライブラリ・外部通信は一切使っていない（10年後も動くことを優先）。
 
  ■ データの置き場所
-   1) 自動保存: ブラウザ内(localStorage キー "testmaker:v1")。10分ごとに履歴も残る。
-   2) 本当のバックアップ: 画面上部「バックアップ保存」で出るJSONファイル。
-      → 学期ごと・大きく編集した後に必ず保存し、Googleドライブ等に置く。
-      ※ ブラウザの履歴削除や、HTMLの置き場所の変更で自動保存は消えることがある。
+   1) データファイル: 先生が選んだ「テスト問題メーカー_データ.json」(ふつうはこのHTMLと同じフォルダ)。
+      変更のたびに自動で上書き保存する(Chrome/Edge のファイルへの直接保存の機能)。中身はバックアップと同じ形＋履歴。
+      選んだファイルは IndexedDB(名前 "testmaker")に覚える。開き直すと編集の許可をもう一度求められることがある。
+   2) 予備: ブラウザ内(localStorage キー "testmaker:v1")。データファイルを使っていないとき・保存できないときの控え。
+      ※ ブラウザの種類・アカウント・PCごとに別々になるので、これだけに頼らない。
+   3) バックアップ: 画面上部「バックアップ保存」で出る日付入りのJSONファイル。学期ごと・大きく編集した後に保存する。
 
  ■ コードの構成（この順に並んでいる。直す場所の目安）
    1. 定数・初期データ      … 記号セット、フォント、サンプルテスト(sampleExam)
@@ -68,6 +70,15 @@ select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);bord
 .status{font-size:13px;color:var(--sub)}
 .badge-bk{font-size:13px;padding:3px 10px;border-radius:99px;background:#e6f4ea;color:var(--ok);cursor:pointer;border:0}
 .badge-bk.dirty{background:var(--warn-bg);color:var(--warn);font-weight:700}
+/* データファイルの状態の帯(上部)。注意が要るときだけ目立たせる */
+.filebar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 14px;font-size:14px;background:#fff;border-bottom:1px solid var(--line);color:var(--sub)}
+.filebar.warn{background:var(--warn-bg);color:var(--warn);font-weight:700}
+.filebar.bad{background:#fdecea;color:var(--danger);font-weight:700}
+.filebar .btn{font-weight:400;color:var(--ink);background:#fff}
+.filebar .btn.primary{color:#fff;background:var(--accent);font-weight:700}
+.fchoice{display:flex;flex-direction:column;gap:10px;margin:12px 0}
+.fchoice .btn{text-align:left;white-space:normal;padding:10px 14px;font-size:16px}
+.fchoice .btn small{display:block;font-size:13px;font-weight:400;opacity:.9;margin-top:2px}
 
 /* ---- main ---- */
 .main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(380px,44%) 1fr;gap:12px;padding:12px}
@@ -232,6 +243,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
       <button class="btn" id="bKeyJson" title="採点アプリに渡すための正答ファイル(JSON)">採点用JSON</button>
     </div>
   </header>
+  <div class="filebar" id="fileBar"></div>
   <div class="main">
     <section class="col"><div class="editor" id="editor"></div></section>
     <section class="col">
@@ -258,6 +270,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 <dialog id="dlgRuby"></dialog>
 <input type="file" id="dictIn" accept=".json,application/json" hidden>
 <dialog id="dlgHelp"><div class="dlg" id="helpBody"></div></dialog>
+<dialog id="dlgFile"><div class="dlg" id="fileBody"></div></dialog>
 
 <script>
 'use strict';
@@ -847,10 +860,16 @@ function loadStore() {
   const ex = sampleExam();
   return { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
 }
+/* localStorage(予備)に保存し、データファイルを使っていればそちらにも書く */
 function saveStore() {
+  clearTimeout(_saveT); _saveT = null;
+  lsSave();
+  DF.dirty = true; dfWrite();
+  updateStatus();
+}
+function lsSave() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(store)); saveFailed = false; store.savedAt = Date.now(); }
   catch (e) { saveFailed = true; console.warn(e); }
-  updateStatus();
 }
 let _saveT = null;
 function saveSoon() { clearTimeout(_saveT); _saveT = setTimeout(saveStore, 500); }
@@ -888,6 +907,186 @@ function importBackup(file) {
     } catch (e) { alert('読み込めませんでした。このアプリで保存したバックアップ(.json)を選んでください。\n' + e.message); }
   };
   fr.readAsText(file);
+}
+
+/* ---- データファイル(.json)への自動保存 ----
+   なぜ：localStorage はブラウザの種類・アカウント・PCごとに別々で、「開く人によって中身が違う」混乱が起きたため(2026-10-29)。
+   Chrome/Edge のファイルへの直接保存(File System Access API)で、先生が選んだ1つのファイルに変更のたびに上書きする。
+   - 中身はバックアップJSONと同じ形(＋履歴など)。バックアップも、データファイルも「読み込み」で開ける。
+   - 選んだファイルは IndexedDB に覚える(ファイルの目印は localStorage には入らないため)。
+     ページを開き直すと、ブラウザの決まりで「編集を許可しますか」をもう一度聞かれることがある。ボタンを押してもらう必要がある。
+   - 別の画面・別のPCが同じファイルを書き換えていたら(ファイルの更新日時で判断)、上書きせずに止めて知らせる。
+   - localStorage は、データファイルを使っていないとき・保存できないときの予備として残している。 */
+const DATA_FILE_NAME = 'テスト問題メーカー_データ.json';
+const FILE_TYPES = [{ description: 'テスト問題メーカーのデータ', accept: { 'application/json': ['.json'] } }];
+// state: unsupported(このブラウザは非対応) | none(未設定) | need(許可待ち) | ok | error(保存失敗) | conflict(別の所で変更された)
+const DF = { handle: null, state: 'none', lastMod: 0, writing: false, again: false, dirty: false, savedAt: 0, err: '' };
+const fsSupported = () => 'showSaveFilePicker' in window && 'showOpenFilePicker' in window && 'indexedDB' in window;
+
+function idb(mode, fn) {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open('testmaker', 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore('kv');
+    rq.onerror = () => rej(rq.error);
+    rq.onsuccess = () => {
+      const db = rq.result, tx = db.transaction('kv', mode), r = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => { db.close(); res(r.result); };
+      tx.onerror = () => { db.close(); rej(tx.error); };
+    };
+  });
+}
+const idbGet = k => idb('readonly', s => s.get(k));
+const idbSet = (k, v) => idb('readwrite', s => s.put(v, k));
+
+function fileData() {
+  store.exams.forEach(e => e.schema = SCHEMA);
+  return { app: 'testmaker', kind: 'data', schema: SCHEMA, savedAt: new Date().toISOString(), current: store.current,
+    exams: store.exams, userDict: store.userDict, snaps: store.snaps,
+    lastBackupAt: store.lastBackupAt || 0, lastChangeAt: store.lastChangeAt || 0, lastSnapAt: store.lastSnapAt || 0 };
+}
+function storeFromData(d) {
+  if (!d || d.app !== 'testmaker' || !Array.isArray(d.exams)) throw new Error('テスト問題メーカーのデータではありません');
+  const s = { v: 1, current: d.current, exams: d.exams.map(migrate), snaps: d.snaps || [], userDict: d.userDict || {},
+    lastBackupAt: d.lastBackupAt || 0, lastChangeAt: d.lastChangeAt || 0, lastSnapAt: d.lastSnapAt || 0 };
+  if (!s.exams.length) s.exams.push(sampleExam());
+  if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id;
+  return s;
+}
+
+/* データファイルに書く。書いている間に変更が来たら、終わってからもう一度書く */
+async function dfWrite() {
+  if (DF.state !== 'ok') return;
+  if (DF.writing) { DF.again = true; return; }
+  DF.writing = true; updateStatus();
+  try {
+    do {
+      DF.again = false;
+      const f = await DF.handle.getFile();
+      if (DF.lastMod && f.lastModified !== DF.lastMod) { DF.state = 'conflict'; break; }
+      const w = await DF.handle.createWritable();
+      await w.write(JSON.stringify(fileData(), null, 1)); await w.close();
+      DF.lastMod = (await DF.handle.getFile()).lastModified; DF.savedAt = Date.now();
+    } while (DF.again);
+    if (DF.state === 'ok') { DF.dirty = false; store.fileSavedAt = DF.savedAt; lsSave(); }
+  } catch (e) { console.warn(e); DF.state = 'error'; DF.err = e.message || String(e); }
+  DF.writing = false; renderFileBar(); updateStatus();
+}
+
+/* このブラウザの予備(localStorage)にだけある編集を、開いたデータファイルに足すか聞く */
+function mergeLocal(s) {
+  if (!store.lastChangeAt) return 0;                                              // ここでは何も編集していない(見本だけ)
+  if (store.fileSavedAt && store.lastChangeAt <= store.fileSavedAt) return 0;     // データファイルの写しのまま
+  // 前回データファイルに書いたあとに、ここで直したテスト(ファイル側と中身が違うもの)を拾う。どちらが新しいかでは決めない(両方で直したとき、黙って片方を消さないため)
+  const byId = new Map(s.exams.map(e => [e.id, e])), since = store.fileSavedAt || 0;
+  const extra = store.exams.filter(e => { const f = byId.get(e.id); return !f || ((e.updatedAt || 0) > since && JSON.stringify(e) !== JSON.stringify(f)); });
+  if (!extra.length) return 0;
+  if (!confirm(`このブラウザの中に、データファイルに入っていない（またはデータファイルと違う内容に直した）テストが ${extra.length} 件あります。\n\n`
+    + extra.map(e => '・' + e.name).join('\n')
+    + '\n\nデータファイルに加えますか？\n［OK］加える（同じテストは「このブラウザの分」として別に加えます）\n［キャンセル］加えない（このブラウザの中の分は、データファイルの内容に置き換わります）')) return 0;
+  extra.forEach(e => { const c = clone(e); if (byId.has(c.id)) { c.id = uid(); c.name += '（このブラウザの分）'; } s.exams.push(c); });
+  Object.keys(store.userDict || {}).forEach(k => { if (!(k in s.userDict)) s.userDict[k] = store.userDict[k]; });
+  s.lastChangeAt = Date.now();
+  return extra.length;
+}
+
+/* 許可済みのファイルを開いて、その中身を今のデータにする(空のファイルなら今の内容を書く) */
+async function dfOpenHandle(hd) {
+  const f = await hd.getFile(), text = await f.text();
+  const s = text.trim() ? storeFromData(JSON.parse(text)) : null;
+  DF.handle = hd; DF.lastMod = f.lastModified; DF.state = 'ok'; DF.err = ''; DF.savedAt = 0;
+  try { await idbSet('dataFile', hd); } catch (e) { console.warn(e); }
+  const merged = s ? mergeLocal(s) : 0;
+  if (s) { s.fileSavedAt = Date.now(); store = s; }
+  if (merged || !s) saveStore(); else { DF.dirty = false; lsSave(); }
+  renderAll(); renderFileBar(); updateStatus();
+}
+function dfFail(e, what) {
+  console.warn(e);
+  alert(`${what}。\n\n理由：${e.message || e}\n\n・Chrome か Edge で開いているか確かめてください。\n・ファイルが別の場所に移されていたら、「データファイルを開く」で選び直してください。\n・作ったテストは、このブラウザの中に控えとして残っています。`);
+}
+async function ask(hd) { return (await hd.queryPermission({ mode: 'readwrite' })) === 'granted' || (await hd.requestPermission({ mode: 'readwrite' })) === 'granted'; }
+const NOT_ALLOWED = '編集が許可されなかったため、データファイルに保存できません。\nもう一度ボタンを押して、「ファイルを編集」（または「許可」）を選んでください。';
+
+async function dfPickOpen() {
+  try {
+    const [hd] = await showOpenFilePicker({ id: 'testmaker', types: FILE_TYPES, multiple: false });
+    if (/バックアップ/.test(hd.name) && !confirm(`「${hd.name}」はバックアップのファイルのようです。\nこのファイルをデータファイルとして使い、これから上書きしていきますか？\n（バックアップを取り込みたいだけなら、キャンセルして上の「読み込み」を使ってください）`)) return;
+    if (!await ask(hd)) { alert(NOT_ALLOWED); return; }
+    await dfOpenHandle(hd); $('#dlgFile').close(); toast(`データファイル「${hd.name}」を開きました`);
+  } catch (e) { if (e.name !== 'AbortError') dfFail(e, 'データファイルを開けませんでした'); }
+}
+async function dfPickCreate() {
+  try {
+    const hd = await showSaveFilePicker({ id: 'testmaker', suggestedName: DATA_FILE_NAME, types: FILE_TYPES });
+    const f = await hd.getFile();
+    if (f.size > 0) {   // 既にあるデータファイルを選んだ：消さずに開く
+      let isData = false; try { isData = JSON.parse(await f.text()).app === 'testmaker'; } catch (e) { }
+      if (isData && confirm(`「${hd.name}」には、すでにデータが入っています。\n［OK］このファイルを開く（おすすめ）\n［キャンセル］今の画面の内容で上書きする`)) { await dfOpenHandle(hd); $('#dlgFile').close(); toast(`データファイル「${hd.name}」を開きました`); return; }
+    }
+    DF.handle = hd; DF.lastMod = 0; DF.state = 'ok'; DF.err = '';
+    try { await idbSet('dataFile', hd); } catch (e) { console.warn(e); }
+    saveStore(); renderFileBar(); $('#dlgFile').close(); toast(`データファイル「${hd.name}」を作りました。これからは自動でここに保存します`);
+  } catch (e) { if (e.name !== 'AbortError') dfFail(e, 'データファイルを作れませんでした'); }
+}
+async function dfReopen() {   // 前回のファイルを開き直す(許可待ち・別の所で変更されたとき)
+  try { if (!await ask(DF.handle)) { alert(NOT_ALLOWED); return; } await dfOpenHandle(DF.handle); $('#dlgFile').close(); toast(`データファイル「${DF.handle.name}」を開きました`); }
+  catch (e) { dfFail(e, 'データファイルを開けませんでした'); DF.state = 'need'; renderFileBar(); }
+}
+async function dfRetry() {    // 保存に失敗したあと、もう一度書く
+  try { if (!await ask(DF.handle)) { alert(NOT_ALLOWED); return; } DF.state = 'ok'; DF.err = ''; saveStore(); }
+  catch (e) { dfFail(e, 'データファイルに保存できませんでした'); }
+}
+function dfOverwrite() {
+  if (!confirm('データファイルを、この画面の内容で上書きします。\n別の画面・別のパソコンで直した内容は、データファイルから消えます。\n（残したいときは、キャンセルして「ファイルを読み直す」を押してください）\n上書きしますか？')) return;
+  DF.lastMod = 0; DF.state = 'ok'; saveStore();
+}
+
+async function dfInit() {
+  if (!fsSupported()) { DF.state = 'unsupported'; renderFileBar(); return; }
+  let hd = null; try { hd = await idbGet('dataFile'); } catch (e) { console.warn(e); }
+  if (!hd) { DF.state = 'none'; renderFileBar(); openFileDialog(); return; }
+  DF.handle = hd;
+  try {
+    if ((await hd.queryPermission({ mode: 'readwrite' })) === 'granted') { await dfOpenHandle(hd); return; }
+  } catch (e) { console.warn(e); }
+  DF.state = 'need'; renderFileBar(); openFileDialog();
+}
+
+/* 上部の帯：今どこに保存しているか */
+function renderFileBar() {
+  const bar = $('#fileBar'), b = (label, fn, cls = '') => h('button', { type: 'button', class: 'btn small ' + cls, onclick: fn }, label);
+  const nm = DF.handle ? `「${DF.handle.name}」` : '';
+  const set = (cls, ...kids) => { bar.className = 'filebar ' + cls; bar.replaceChildren(...kids); };
+  if (DF.state === 'ok') set('', `データファイル${nm}に自動で保存しています。`, b('保存先を変える', () => openFileDialog(true)));
+  else if (DF.state === 'need') set('warn', `⚠ データファイル${nm}をまだ開いていません。今の画面は、このブラウザの中の控えです。`, b('データファイルを開く', dfReopen, 'primary'));
+  else if (DF.state === 'none') set('warn', '⚠ このブラウザの中にだけ保存しています（別のブラウザ・パソコンからは見えません）。', b('保存先のファイルを決める', () => openFileDialog(), 'primary'));
+  else if (DF.state === 'error') set('bad', `⚠ データファイル${nm}に保存できませんでした（${DF.err}）。このブラウザの中には控えがあります。`, b('もう一度保存', dfRetry, 'primary'), b('保存先を変える', () => openFileDialog(true)));
+  else if (DF.state === 'conflict') set('bad', `⚠ データファイル${nm}が、別の画面か別のパソコンで変更されました。上書きしないよう、自動保存を止めています。`, b('ファイルを読み直す', dfReopen, 'primary'), b('この画面の内容で上書き', dfOverwrite));
+  else set('warn', '⚠ このブラウザはファイルへの保存に対応していません。Chrome か Edge で開いてください（今はこのブラウザの中にだけ保存しています）。');
+}
+
+/* はじめて・開き直したときに出す画面。change=true は「保存先を変える」から */
+function openFileDialog(change) {
+  const dlg = $('#dlgFile'), body = $('#fileBody'), close = () => dlg.close();
+  const choice = (label, sub, fn, cls = '') => h('button', { type: 'button', class: 'btn ' + cls, onclick: fn }, label, h('small', {}, sub));
+  if (DF.state === 'need' && !change) {
+    body.replaceChildren(h('h2', {}, 'データファイルを開きます'),
+      h('p', {}, `前回使ったデータファイル「${DF.handle.name}」を開きます。`),
+      h('p', {}, '下のボタンを押すと、ブラウザが「このファイルの編集を許可しますか？」のようにたずねます。', h('b', {}, '「ファイルを編集」（または「許可」）'), 'を押してください。'),
+      h('div', { class: 'fchoice' },
+        choice('データファイルを開く', `「${DF.handle.name}」を開いて、続きから作ります。`, dfReopen, 'primary'),
+        choice('別のデータファイルを選ぶ', 'ほかのフォルダのデータファイルを使うとき。', dfPickOpen),
+        choice('開かずに使う', 'このブラウザの中の控えで作業します（データファイルには保存されません）。', close)));
+  } else {
+    body.replaceChildren(h('h2', {}, change ? '保存先のファイルを変える' : '作ったテストの保存先を決めてください'),
+      h('p', {}, '作ったテストは、データファイル（', h('b', {}, DATA_FILE_NAME), '）に自動で保存します。'),
+      h('p', {}, h('b', {}, 'TestMaker.html と同じフォルダ'), 'に置くと、別のパソコン・別のブラウザで開いても、同じデータを使えます。'),
+      h('div', { class: 'fchoice' },
+        choice('データファイルを開く', `同じフォルダに「${DATA_FILE_NAME}」がすでにあるときは、こちらで選びます。`, dfPickOpen, 'primary'),
+        choice('データファイルを新しく作る', 'はじめて使うとき。保存する場所に、TestMaker.html と同じフォルダを選んでください。今の画面のテストが入ります。', dfPickCreate),
+        choice(change ? 'やめる' : 'あとで決める', change ? '今のまま変えません。' : '今はこのブラウザの中にだけ保存します（別のブラウザ・パソコンからは見えません）。', close)));
+  }
+  if (!dlg.open) dlg.showModal();
 }
 
 /* =====================================================================
@@ -1121,7 +1320,9 @@ function fitPreview() {
   sheet.style.zoom = Math.min(1, avail / full);
 }
 function updateStatus() {
-  $('#saveStat').textContent = saveFailed ? '⚠ 自動保存できません。必ずバックアップ保存を' : (store.savedAt ? `自動保存 ${fmtTime(store.savedAt)}` : '');
+  $('#saveStat').textContent = DF.state === 'ok'
+    ? (DF.writing || DF.dirty ? '保存中…' : (DF.savedAt ? `データファイルに保存 ${fmtTime(DF.savedAt)}` : 'データファイルを開きました'))
+    : (saveFailed ? '⚠ 自動保存できません。必ずバックアップ保存を' : (store.savedAt ? `このブラウザに保存 ${fmtTime(store.savedAt)}` : ''));
   const b = $('#bkBadge'), dirty = store.lastChangeAt > (store.lastBackupAt || 0);
   b.className = 'badge-bk' + (dirty || !store.lastBackupAt ? ' dirty' : '');
   b.textContent = !store.lastBackupAt ? 'バックアップ未実施' : (dirty ? `未バックアップの変更あり（前回 ${fmtTime(store.lastBackupAt)}）` : `バックアップ済 ${fmtTime(store.lastBackupAt)}`);
@@ -1172,7 +1373,11 @@ function setupButtons() {
   $('#bKeyJson').onclick = () => { const ex = cur(); download(new Blob([JSON.stringify(buildKeyJSON(compile(ex), ex), null, 1)], { type: 'application/json' }), `${safeName(ex.name)}_採点用.json`); toast('採点アプリ用の正答ファイルを書き出しました'); };
   document.querySelectorAll('.ptab').forEach(b => b.onclick = () => { ui.tab = b.dataset.tab; document.querySelectorAll('.ptab').forEach(x => x.classList.toggle('on', x === b)); refresh(); });
   window.addEventListener('resize', fitPreview);
-  window.addEventListener('beforeunload', () => { clearTimeout(_saveT); saveStore(); });
+  // ファイルへの書き込みは非同期なので、書き終わる前に閉じようとしたら「このページを離れますか」を出して待ってもらう
+  window.addEventListener('beforeunload', e => {
+    if (_saveT) saveStore();
+    if (DF.state === 'ok' && (DF.dirty || DF.writing)) { e.preventDefault(); e.returnValue = ''; }
+  });
 }
 
 function openHistory() {
@@ -1206,9 +1411,15 @@ function helpHTML() {
 <li>「漢字すべてに自動でルビ」をオンにすると、手で付けていない漢字にも自動で読みが付きます（同じフォルダの <code>ruby-engine.js</code> が必要）。優先順位は ①手で付けたルビ ②登録した辞書 ③自動 です。</li>
 <li>自動の読みは完全ではありません（「行った」「進数」など）。出力前に「ルビの確認・辞書」で一覧を見て、直した読みは登録しておくと次回以降も使われます。辞書はバックアップにも入ります。</li>
 <li>フォントは基本設定で選びます。教科書体は「UD デジタル 教科書体」（Windows10以降に標準搭載）。入っていないパソコンではWord／印刷とも別の字体になります。</li></ul>
+<h4>データの保存（データファイル）</h4>
+<ul><li>作ったテストは、データファイル（<code>${DATA_FILE_NAME}</code>）に<b>自動で</b>保存します。<b>TestMaker.html と同じフォルダ</b>に置くと、別のパソコン・ブラウザでも同じデータを使えます。</li>
+<li>はじめて開いたときに「データファイルを新しく作る」か「データファイルを開く」を選びます。あとから変えるときは、画面上の帯の「保存先を変える」。</li>
+<li>開き直したとき、ブラウザが「このファイルの編集を許可しますか？」とたずねることがあります。<b>「ファイルを編集」（または「許可」）</b>を押してください。</li>
+<li>画面上の帯が黄色・赤のときは、データファイルに保存できていません。帯のボタンを押してください。</li>
+<li>同じデータファイルを2つの画面で同時に直さないでください。別の所で変更されたときは、上書きせずに止めてお知らせします。</li></ul>
 <h4>バックアップ</h4>
-<ul><li>自動保存はこのブラウザの中だけです（履歴は10分ごと・40件）。</li>
-<li><b>学期ごと・大きく編集したあとに「バックアップ保存」</b>→ JSONファイルをGoogleドライブ等に置いてください。別のパソコンでも「読み込み」で再開できます。</li>
+<ul><li>データファイルとは別に、ブラウザの中にも控えを残しています（履歴は10分ごと・40件。データファイルにも入ります）。</li>
+<li><b>学期ごと・大きく編集したあとに「バックアップ保存」</b>→ 日付入りのJSONファイルを校務共有サーバー等に置いてください。別のパソコンでも「読み込み」で再開できます。</li>
 <li>読み込みは「新しいテストとして追加」なので、今のデータは上書きされません。</li>
 <li>次の学期は「複製」から始めると、設定と問題の形をそのまま使えます。</li></ul>
 <h4>引き継ぎ担当者向け</h4>
@@ -1319,6 +1530,7 @@ store = loadStore();
 setupButtons();
 renderAll();
 saveStore();
+dfInit();
 </script>
 </body>
 </html>
