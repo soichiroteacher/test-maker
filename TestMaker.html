@@ -334,7 +334,9 @@ const LABEL_SETS = {
 const LABEL_NAMES = { kana:'ア・イ・ウ…（カタカナ）', maru:'①・②・③…', abc:'A・B・C…' };
 const FONTS = [
   ['BIZ UDPゴシック','"BIZ UDPGothic","BIZ UDPゴシック","Yu Gothic","Meiryo",sans-serif'],
-  ['UD デジタル 教科書体 NP-R','"UD Digital Kyokasho NP-R","UD デジタル 教科書体 NP-R","UD デジタル 教科書体 N-R","HG教科書体","Yu Mincho",serif'],
+  // 教科書体：Chrome/Edge は「NP-R」の名前では見つけられず、次の HG教科書体 で出ていた(2026-10-29 に確かめた)。
+  // Windows の字体の家族名は「UD デジタル 教科書体 NP」なので、それを先に書く。Word は左の名前(NP-R)で見つけられる
+  ['UD デジタル 教科書体 NP-R','"UD Digi Kyokasho NP","UD デジタル 教科書体 NP","UD Digi Kyokasho NP-R","UD デジタル 教科書体 NP-R","HG教科書体","Yu Mincho",serif'],
   ['HG教科書体','"HGKyokashotai","HG教科書体","HGP教科書体","UD デジタル 教科書体 NP-R","Yu Mincho",serif'],
   ['BIZ UDP明朝','"BIZ UDPMincho","BIZ UDP明朝","Yu Mincho","MS PMincho",serif'],
   ['游ゴシック','"Yu Gothic","游ゴシック","Meiryo",sans-serif'],
@@ -1929,7 +1931,8 @@ function refresh() {
   if (needEngine(ex) && engState === 'idle') ensureEngine();
   const host = $('#sheetHost');
   const html = ui.tab === 'paper' ? renderPaperHTML(C) : renderKeyHTML(C);
-  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="--fs:${ex.meta.size}pt;font-family:${fontCss(ex.meta.font)}">${html}</div>`;
+  // 字体の名前の " は ' にする(style="…" の中に " があると、そこで指定が切れて字体が効かなかった。2026-10-29 に直した)
+  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="--fs:${ex.meta.size}pt;font-family:${fontCss(ex.meta.font).replace(/"/g, "'")}">${html}</div>`;
   fitPreview();
   // 警告
   const w = $('#warns');
