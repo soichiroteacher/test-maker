@@ -145,39 +145,41 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .warns ul{margin:4px 0 0;padding-left:1.2em}
 
 /* ---- the paper (screen + print) ---- */
-.sheet{background:#fff;width:210mm;padding:14mm;margin:0 auto;box-shadow:0 2px 10px rgba(0,0,0,.25);color:#000;
+.sheet{background:#fff;width:210mm;padding:14mm var(--mx,14mm);margin:0 auto;box-shadow:0 2px 10px rgba(0,0,0,.25);color:#000;
   font-size:var(--fs,11pt);line-height:1.75;transform-origin:top center}
 .sheet *{box-sizing:border-box}
 .p-date{text-align:right;font-size:9pt}
 .p-title{text-align:center;font-weight:700;font-size:1.3em;margin:2mm 0 0;line-height:1.4}
 .p-kind{text-align:center;font-weight:700;font-size:1.9em;letter-spacing:.35em;margin:0 0 3mm;line-height:1.3}
-.p-name{display:flex;justify-content:flex-end;align-items:flex-end;gap:2mm;margin:0 0 4mm;font-size:1em}
-.p-name .ln{display:inline-block;border-bottom:1px solid #000;min-width:12mm;height:1.6em}
-.p-name .ln.w{min-width:40mm}
-.p-notice{border:1.5px solid #000;border-radius:3px;padding:2mm 4mm;margin:0 0 3mm;font-weight:700;font-size:.95em;line-height:1.6}
+/* 氏名欄：年・組・番は同じ幅(15mm)、名前は残りいっぱい。Word も同じ形(buildDocx) */
+.p-name{display:flex;align-items:flex-end;gap:2mm;margin:0 0 4mm auto;width:62%;font-size:1em}
+.p-name .ln{display:inline-block;border-bottom:1px solid #000;width:15mm;flex:none;height:1.6em}
+.p-name .ln.w{flex:1;width:auto}
+/* 行間：--ls(行間の倍率)をかける。数字は Word の段落の行間(P の line ÷ 200)と同じ */
+.p-notice{border:1.5px solid #000;border-radius:3px;padding:2mm 4mm;margin:0 0 3mm;font-weight:700;font-size:.95em;line-height:calc(1.5 * var(--ls,1))}
 .p-notice div{padding-left:1.2em;text-indent:-1.2em}
-.p-intro{margin:0 0 3mm;text-indent:1em}
+.p-intro{margin:0 0 3mm;text-indent:1em;line-height:calc(1.7 * var(--ls,1))}
 .sec{margin-top:5mm}
 .para.last{break-after:avoid}
 @media print{.sec.pb{break-before:page;margin-top:0}}
 .sec h2{display:flex;align-items:center;gap:3mm;margin:0 0 2mm;padding-bottom:1mm;border-bottom:2px solid #000;font-size:1.15em;line-height:1.5;break-after:avoid}
 .sec h2 .no{background:#000;color:#fff;border-radius:2px;min-width:1.7em;text-align:center;padding:0 .25em;font-weight:700}
 .sec h2 small{font-weight:400;font-size:.85em;margin-left:auto;white-space:nowrap}
-.lead{margin:0 0 1.5mm;text-indent:1em}
-.note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em}
-.para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:1.95;orphans:2;widows:2}
+.lead{margin:0 0 1.5mm;text-indent:1em;line-height:calc(1.65 * var(--ls,1))}
+.note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em;line-height:calc(1.6 * var(--ls,1))}
+.para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:calc(2 * var(--ls,1));orphans:2;widows:2}
 .blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .1em;white-space:nowrap}
 .bank{border:1.5px solid #000;margin:2mm 0 1mm;break-inside:avoid}
 .bank-h{border-bottom:1.5px solid #000;padding:.2mm 3mm;font-size:.95em}
 .bank-h span{margin-left:1em;font-size:.9em}
 .bank-g{display:grid;padding:1mm 2mm}
-.bank-g div{padding:.5mm 1mm;line-height:1.6}
+.bank-g div{padding:.5mm 1mm;line-height:calc(1.65 * var(--ls,1))}
 .lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
-.q-t{text-indent:-3.9em;line-height:1.7}
+.q-t{text-indent:-3.9em;line-height:calc(1.7 * var(--ls,1))}
 .q-t .qn{display:inline-block;width:3.9em;white-space:nowrap;text-indent:0;font-weight:700}
 .q-c{display:grid;margin-top:.5mm}
-.q-c div{line-height:1.6;padding-right:2mm}
+.q-c div{line-height:calc(1.6 * var(--ls,1));padding-right:2mm}
 .ansbox{border:1px solid #000;margin:1mm 0 0;background:#fff}
 /* 図。ページの途中で切らない。白黒印刷が前提なので、色は「白黒にする」で画面でも灰色の濃さで確かめられる */
 .figs{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:2mm 3mm;margin:2mm 0}
@@ -210,11 +212,12 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .ruby-on .fig figcaption{line-height:2}
 .sheet .pt{font-size:.85em;margin-left:.5em}
 .sheet ruby rt{font-size:.55em;font-weight:400;line-height:1}
-.sheet.ruby-on{line-height:2.2}
-.ruby-on .para{line-height:2.35}
+/* ルビ付きの行は、ルビの分だけ高さが要る(Word も自動で行を高くする)。--rf より狭くはしない */
+.sheet.ruby-on{line-height:2.2;--rf:2}
+.ruby-on .para{line-height:max(calc(2 * var(--ls,1)), var(--rf))}
 .ruby-on .p-title{line-height:2.1}
 .ruby-on .p-kind{line-height:1.9}
-.ruby-on .q-t,.ruby-on .q-c div,.ruby-on .bank-g div,.ruby-on .lead,.ruby-on .note,.ruby-on .p-notice{line-height:2.1}
+.ruby-on .q-t,.ruby-on .q-c div,.ruby-on .bank-g div,.ruby-on .lead,.ruby-on .note,.ruby-on .p-notice,.ruby-on .p-intro{line-height:max(calc(1.7 * var(--ls,1)), var(--rf))}
 .edtool{position:sticky;top:0;z-index:2;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:2px 0 8px}
 .p-end{margin-top:6mm;text-align:center;font-size:.9em}
 /* answer key */
@@ -263,10 +266,11 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 @media print{
   .pt{width:100%;border-collapse:collapse}
   .pt td{padding:0}
-  .pt thead td{height:13mm}
-  .pt tfoot td{height:15mm}
-  .pfoot{position:fixed;left:14mm;right:14mm;bottom:5mm;font-size:8pt;line-height:1.3;color:#000}
-  #printRoot .sheet{padding:0 14mm!important}
+  .pt thead td{height:var(--mt,14mm)}
+  .pt tfoot td{height:var(--mb,16mm)}
+  .pfoot{position:fixed;left:var(--mx,14mm);right:var(--mx,14mm);bottom:5mm;font-size:8pt;line-height:1.3;color:#000}
+  #printRoot .sheet{padding:0 var(--mx,14mm)!important}
+  .sec.keep{break-inside:avoid}
 }
 </style>
 </head>
@@ -331,12 +335,13 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 6;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 7;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
                                         // 5(2026-10-29): コードの欄の種類(codeKind: text|blocks)とブロックの大きさ(blockScale)を追加
                                         // 6(2026-10-29): 選択肢を文字列から {text, img} に(図の選択肢)。設問に choiceCols・choiceH
+                                        // 7(2026-10-29): 体裁に行間(lineSpacing)・余白(margin)・改ページ「大問の途中で変えない」(pageMode: keep)・ページ数(fitPages)
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -357,6 +362,13 @@ const FONTS = [
   ['MS 明朝','"MS Mincho","MS 明朝",serif'],
 ];
 const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
+/* 体裁：行間と余白。画面・印刷と Word で同じ値を使う(見た目をそろえるため)。
+   行間は倍率。Word の段落の行間(P の line)と、画面の line-height の両方にかける */
+const LINE_SPACING = { tight: ['狭め', 0.88], normal: ['ふつう', 1], loose: ['広め', 1.15] };
+const MARGINS = { normal: ['ふつう', { t: 14, b: 16, x: 14 }], narrow: ['狭め', { t: 10, b: 13, x: 10 }] };   // mm(上・下・左右)
+const PAGE_MODES = { keep: '詰めるが、大問の途中ではページを変えない（入らない大問は次のページへ）', flow: '続けて詰める（大問の途中でもページが変わる）', section: '大問ごとに改ページ' };
+const lsOf = m => (LINE_SPACING[m.lineSpacing] || LINE_SPACING.normal)[1];
+const mgOf = m => (MARGINS[m.margin] || MARGINS.normal)[1];
 const CHOICE_COLS = { auto: '自動', 1: '1列', 2: '2列', 4: '4列' };
 const ITEM_FIG_POS = { below: '問題文の下', right: '問題文の右' };
 const CODE_KIND = { text: '文字のコード', blocks: 'ブロック（MakeCode のような）' };
@@ -451,7 +463,8 @@ function newMeta() {
     notice: 'マークシートは機械で読み取ります。解答用紙の記入例を参考に、枠からはみ出さないよう、濃くていねいに塗りつぶしなさい。\n読み取れないものや、２か所以上塗りつぶしたものは、原則として×とします。',
     intro: '各問題の指示にしたがって、解答用紙のマークシートの記号を塗りつぶしなさい。',
     showName: true, font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
-    showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'flow', keepBank: true,
+    showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'keep', keepBank: true,
+    lineSpacing: 'normal', margin: 'normal', fitPages: 2,
     footer: '本教材のすべての権利は作成者が保有しています。本教材の内容は無断で複製、配布、転載することを禁じます。'
   };
 }
@@ -943,7 +956,7 @@ function renderPaperHTML(C, force) {
   if (m.intro.trim()) h += `<p class="p-intro">${escR(m.intro.trim())}</p>`;
 
   C.sections.forEach(sec => {
-    h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}">${headingHTML(sec, m)}`;
+    h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}${m.pageMode === 'keep' ? ' keep' : ''}">${headingHTML(sec, m)}`;
     if (sec.lead) h += `<p class="lead">${escR(sec.lead)}</p>`;
     sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
 
@@ -1052,7 +1065,7 @@ function R(t, o = {}) {           // run
   if (o.shd) r += `<w:shd w:val="clear" w:color="auto" w:fill="${o.shd}"/>`;
   return `<w:r>${r ? `<w:rPr>${r}</w:rPr>` : ''}<w:t xml:space="preserve">${X(t)}</w:t></w:r>`;
 }
-let BASE_SZ = 22;
+let BASE_SZ = 22, LSK = 1;   // LSK = 行間の倍率(lsOf)
 function RR(t, o = {}) {                // ルビ対応の run 群
   if (!RUBY) return R(plain(t), o);
   const base = o.sz || BASE_SZ, rs = Math.max(9, Math.round(base * 0.55));
@@ -1068,7 +1081,7 @@ function P(runs, o = {}) {        // paragraph
   if (o.box) p += '<w:pBdr><w:top w:val="single" w:sz="12" w:space="3" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="6" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="3" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="6" w:color="000000"/></w:pBdr>';
   if (o.underline) p += '<w:pBdr><w:bottom w:val="single" w:sz="16" w:space="2" w:color="000000"/></w:pBdr>';
   if (o.tabs) p += `<w:tabs>${o.tabs}</w:tabs>`;
-  p += `<w:spacing w:before="${o.before || 0}" w:after="${o.after || 0}"${o.line ? ` w:line="${Math.round(o.line * BASE_SZ / 20)}" w:lineRule="atLeast"` : ''}/>`;
+  p += `<w:spacing w:before="${o.before || 0}" w:after="${o.after || 0}"${o.line ? ` w:line="${Math.round(o.line * BASE_SZ / 20 * LSK)}" w:lineRule="atLeast"` : ''}/>`;
   if (o.left != null || o.hanging != null || o.first != null || o.right != null)
     p += `<w:ind w:left="${o.left || 0}"${o.right ? ` w:right="${o.right}"` : ''}${o.hanging ? ` w:hanging="${o.hanging}"` : ''}${o.first ? ` w:firstLine="${o.first}"` : ''}/>`;
   if (o.jc) p += `<w:jc w:val="${o.jc}"/>`;
@@ -1139,7 +1152,8 @@ async function rasterize(im, gray) {
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 
 function buildDocx(C, imgs = new Map()) {
-  const m = C.meta, FW = 10106, IND = 800; RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
+  const mg = mgOf(C.meta), MM = 56.7;   // 1mm = 56.7 twip
+  const m = C.meta, FW = 11906 - Math.round(mg.x * MM) * 2, IND = 800; LSK = lsOf(m); RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
   BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
   const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
   const lab = t => R(t, { b: true, bdr: true });
@@ -1208,17 +1222,28 @@ function buildDocx(C, imgs = new Map()) {
   if (m.date.trim()) body.push(P(R(m.date, { sz: 18 }), { jc: 'right' }));
   body.push(P(RR(m.title, { b: true, sz: 28 }), { jc: 'center', before: 40, after: 20 }));
   body.push(P(R(m.kind, { b: true, sz: 40, spacing: 80 }), { jc: 'center', after: 80 }));
-  if (m.showName) {
-    body.push(P([TAB, R('年'), TAB, R('組'), TAB, R('番　名前'), TAB],
-      { left: 2600, before: 40, after: 160, jc: 'left',
-        tabs: '<w:tab w:val="right" w:leader="underscore" w:pos="4000"/><w:tab w:val="right" w:leader="underscore" w:pos="5100"/><w:tab w:val="right" w:leader="underscore" w:pos="6200"/><w:tab w:val="right" w:leader="underscore" w:pos="' + FW + '"/>' }));
+  if (m.showName) {   // 画面と同じ：年・組・番の欄は 15mm、名前は右端まで。字の幅は1字 = 字の大きさ(unit)で見積もる
+    const x0 = Math.round(FW * 0.38), lw = Math.round(15 * MM);
+    // 右そろえのタブなので、タブの位置は「下線＋その後の字(「　年」は2字、「　番　名前」は5字)」の右端
+    const p1 = x0 + lw + unit * 2, p2 = p1 + lw + unit * 2, p3 = p2 + lw + unit * 5;
+    const tab = v => `<w:tab w:val="right" w:leader="underscore" w:pos="${v}"/>`;
+    body.push(P([TAB, R('　年'), TAB, R('　組'), TAB, R('　番　名前'), TAB],
+      { left: x0, before: 40, after: 160, jc: 'left', tabs: tab(p1) + tab(p2) + tab(p3) + tab(FW) }));
   }
   const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   nl.forEach((x, i) => body.push(P(RR('※　' + x, { b: true, sz: sz - 1 }), { box: true, left: 120, right: 120, hanging: 0, line: 300, before: i === 0 ? 40 : 0, after: i === nl.length - 1 ? 120 : 0 })));
   if (m.intro.trim()) body.push(P(RR(m.intro.trim()), { first: unit, line: 340, after: 60 }));
 
   // ---- 大問 ----
+  // 「大問の途中で変えない」：大問の中のすべての段落に「次の段落と分離しない」「段落を分割しない」を付ける(最後の段落だけ外す)。
+  // 1ページに入らない大問は、Word が途中で分ける
+  const keepAll = x => {
+    x = x.replace(/<w:keepNext\/>|<w:keepLines\/>/g, '').replace(/<w:pPr>/g, '<w:pPr><w:keepNext/><w:keepLines/>');
+    const i = x.lastIndexOf('<w:pPr><w:keepNext/>');
+    return i < 0 ? x : x.slice(0, i) + '<w:pPr>' + x.slice(i + 20);
+  };
   C.sections.forEach(sec => {
+    const s0 = body.length;
     const pt = (m.showPoints && sec.type !== 'written' && sec.points) ? [R(`　（各${sec.points}点）`, { sz: sz - 3 })] : [];
     body.push(P([R(' ' + zen(sec.no) + ' ', { b: true, color: 'FFFFFF', shd: '000000', sz: sz + 2 }), RR('　' + sec.title, { b: true, sz: sz + 2 }), ...pt],
       { keepNext: true, underline: true, before: 240, after: 80, line: 320, pbb: m.pageMode === 'section' && sec.no > 1 }));
@@ -1260,7 +1285,7 @@ function buildDocx(C, imgs = new Map()) {
       }
       else if (sec.type === 'tf') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
-          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 360, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
           () => '')));
       }
       else if (sec.type === 'written') {
@@ -1277,19 +1302,21 @@ function buildDocx(C, imgs = new Map()) {
     const F = sec.figs;
     if (!F.length) { const r = renderBody(FW); body.push(...r.main, ...r.after); }
     else if (sec.figPos === 'right') {   // 右：語群は用紙の幅いっぱい
-      body.push(figRightXml(F, FW, w => renderBody(w).main.join('')), ...renderBody(FW).after);
+      // 表どうしがくっつくと Word が1つの表にして語群の枠線が消えるので、間に空の段落を入れる
+      body.push(figRightXml(F, FW, w => renderBody(w).main.join('')), SPACER(60), ...renderBody(FW).after);
     }
     else {   // 上・下
       const r = renderBody(FW), figs = figsRowXml(F, FW);
       if (sec.figPos === 'above') body.push(figs, ...r.main, ...r.after);
       else body.push(...r.main, figs, ...r.after);
     }
+    if (m.pageMode === 'keep') body.push(keepAll(body.splice(s0).join('')));
   });
   body.push(P(''));   // 本文末は必ず段落で終える
 
   const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
   const NSD = NS + ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
-  const sect = '<w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="900" w:bottom="1000" w:left="900" w:header="567" w:footer="450" w:gutter="0"/></w:sectPr>';
+  const sect = `<w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="${Math.round(mg.t * MM)}" w:right="${Math.round(mg.x * MM)}" w:bottom="${Math.round(mg.b * MM)}" w:left="${Math.round(mg.x * MM)}" w:header="567" w:footer="400" w:gutter="0"/></w:sectPr>`;
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NSD}><w:body>${body.join('')}${sect}</w:body></w:document>`;
   const ftr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="${FW}"/></w:tabs><w:spacing w:before="0" w:after="0"/></w:pPr>` +
     R(m.footer.trim(), { sz: 16 }) + TAB +
@@ -1726,7 +1753,10 @@ function settingsCard(ex) {
     field('全体の指示文（注意書きの下。空なら非表示）', bindText(m, 'intro', { tag: 'textarea', rows: 2 })),
     h('div', { class: 'row' },
       field('選択肢の記号', bindSelect(m, 'labelSet', Object.entries(LABEL_NAMES))),
-      field('文字の大きさ', bindSelect(m, 'size', [[10.5, '10.5pt（小）'], [11, '11pt（標準）'], [12, '12pt（大）']], { numeric: true }))),
+      field('文字の大きさ', bindSelect(m, 'size', [[10, '10pt'], [10.5, '10.5pt（小）'], [11, '11pt（標準）'], [12, '12pt（大）']], { numeric: true }))),
+    h('div', { class: 'row' },
+      field('行間', bindSelect(m, 'lineSpacing', Object.entries(LINE_SPACING).map(([k, v]) => [k, v[0]]))),
+      field('余白', bindSelect(m, 'margin', Object.entries(MARGINS).map(([k, v]) => [k, v[0]])))),
     h('div', { class: 'row' },
       field('フォント（Word出力で使用）', bindSelect(m, 'font', FONTS.map(f => [f[0], f[0]]))),
       field('語群の列数', bindSelect(m, 'bankCols', [[0, '自動'], [2, '2列'], [3, '3列'], [4, '4列'], [5, '5列']], { numeric: true }))),
@@ -1734,7 +1764,7 @@ function settingsCard(ex) {
       field('マークシートの最大選択肢数', bindText(m, 'maxChoices', { type: 'number', min: 2, max: 20 }), 'これを超えると警告します'),
       h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
-    field('改ページ', bindSelect(m, 'pageMode', [['flow', '続けて詰める（ページいっぱいに使う）'], ['section', '大問ごとに改ページ']])),
+    field('改ページ', bindSelect(m, 'pageMode', Object.entries(PAGE_MODES))),
     field('ページ下の文言（著作権表示など）', bindText(m, 'footer'))
   );
   return d;
@@ -2001,7 +2031,7 @@ function refresh() {
   const host = $('#sheetHost');
   const html = ui.tab === 'paper' ? renderPaperHTML(C) : renderKeyHTML(C);
   // 字体の名前の " は ' にする(style="…" の中に " があると、そこで指定が切れて字体が効かなかった。2026-10-29 に直した)
-  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="--fs:${ex.meta.size}pt;font-family:${fontCss(ex.meta.font).replace(/"/g, "'")}">${html}</div>`;
+  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="${sheetStyle(ex.meta)}">${html}</div>`;
   fitPreview();
   // 警告
   const w = $('#warns');
@@ -2019,6 +2049,8 @@ function refresh() {
   $('#countStat').textContent = `マークシート${C.answers.length}問 ・ 記述${C.written.length}問 ・ ${C.total}点`;
   updateStatus();
 }
+/* 用紙の字・行間・余白の指定(画面・印刷・ページ数を数えるときに使う) */
+const sheetStyle = m => `--fs:${m.size}pt;--ls:${lsOf(m)};--mx:${mgOf(m).x}mm;--mt:${mgOf(m).t}mm;--mb:${mgOf(m).b}mm;font-family:${fontCss(m.font).replace(/"/g, "'")}`;
 function fitPreview() {
   const sheet = $('#sheetHost .sheet'); if (!sheet) return;
   const avail = $('#preview').clientWidth - 24, full = 793.7;
@@ -2041,6 +2073,7 @@ function renderAll() { renderExamSel(); renderEditor(); }
 
 function doPrint() {
   const ft = esc(cur().meta.footer || '');
+  const mg = mgOf(cur().meta); $('#printRoot').style.cssText = `--mx:${mg.x}mm;--mt:${mg.t}mm;--mb:${mg.b}mm`;
   $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}</td></tr></tbody></table><div class="pfoot">${ft}</div>`;
   const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' : '_正答一覧');
   window.print(); document.title = old;
