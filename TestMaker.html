@@ -23,7 +23,7 @@
       選んだファイルは IndexedDB(名前 "testmaker")に覚える。開き直すと編集の許可をもう一度求められることがある。
    2) 予備: ブラウザ内(localStorage キー "testmaker:v1")。データファイルを使っていないとき・保存できないときの控え。
       ※ ブラウザの種類・アカウント・PCごとに別々になるので、これだけに頼らない。
-   3) バックアップ: 画面上部「バックアップ保存」で出る日付入りのJSONファイル。学期ごと・大きく編集した後に保存する。
+   3) バックアップ: 画面上部「データ」→「バックアップを保存する」で出る日付入りのJSONファイル。学期ごと・大きく編集した後に保存する。
 
  ■ コードの構成（この順に並んでいる。直す場所の目安）
    1. 定数・初期データ      … 記号セット、フォント、サンプルテスト(sampleExam)
@@ -69,6 +69,24 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* ---- top bar ---- */
 .top{background:#fff;border-bottom:1px solid var(--line);padding:8px 14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
 .top h1{font-size:17px;margin:0 6px 0 0;white-space:nowrap}
+/* メニュー(▾ を押すと開く)。外を押すと閉じる(setupMenus) */
+.menu{position:relative}
+.menu-p{display:none;position:absolute;left:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.18);padding:6px;min-width:240px}
+.menu-p.right{left:auto;right:0}
+.menu.open .menu-p{display:block}
+.menu-p button{display:block;width:100%;text-align:left;border:0;background:none;padding:8px 10px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.menu-p button:hover{background:#eef3fb}
+.menu-p button.danger{color:var(--danger)}
+.menu-p hr{border:0;border-top:1px solid var(--line);margin:4px 2px}
+.menu-note{font-size:12.5px;color:var(--sub);padding:4px 10px 6px}
+.menu-note.dirty{color:var(--warn);font-weight:700}
+.btn.dirty{border-color:#f0cf94;background:var(--warn-bg)}
+/* プレビューの大きさ(大・小・なし) */
+.seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg .seg-l{font-size:12.5px;color:var(--sub);padding:0 8px}
+.seg button{border:0;border-left:1px solid var(--line);background:#fff;padding:6px 10px;cursor:pointer}
+.seg button.on{background:#1f2933;color:#fff}
+.warnbadge{border:1px solid #f0cf94;background:var(--warn-bg);color:var(--warn);font-weight:700;border-radius:99px;padding:3px 10px;cursor:pointer;font-size:13px}
 .grp{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .grp.sep{padding-left:14px;border-left:1px solid var(--line)}
 .spacer{flex:1}
@@ -85,6 +103,7 @@ select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);bord
 .badge-bk.dirty{background:var(--warn-bg);color:var(--warn);font-weight:700}
 /* データファイルの状態の帯(上部)。注意が要るときだけ目立たせる */
 .filebar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 14px;font-size:14px;background:#fff;border-bottom:1px solid var(--line);color:var(--sub)}
+.filebar[hidden]{display:none}
 .filebar.warn{background:var(--warn-bg);color:var(--warn);font-weight:700}
 .filebar.bad{background:#fdecea;color:var(--danger);font-weight:700}
 .filebar .btn{font-weight:400;color:var(--ink);background:#fff}
@@ -95,6 +114,10 @@ select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);bord
 
 /* ---- main ---- */
 .main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(380px,44%) 1fr;gap:12px;padding:12px}
+.main.pv-small{grid-template-columns:1fr minmax(260px,30%)}
+.main.pv-none{grid-template-columns:1fr}
+.main.pv-none .pvcol{display:none}
+.main.pv-none .editor{max-width:980px;width:100%;margin:0 auto}
 .col{min-height:0;display:flex;flex-direction:column}
 .editor{overflow:auto;padding-right:4px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
@@ -276,35 +299,48 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 </head>
 <body>
 <div class="app">
+  <!-- 上の帯：よく使うもの(テストの切り替え・出力)だけを見せ、ほかはメニューにまとめた(2026-10-29。ボタンが多くて分かりづらいという声から) -->
   <header class="top">
     <h1>テスト問題メーカー</h1>
     <div class="grp">
       <select id="examSel" class="examsel" title="作成中のテストを切り替え"></select>
-      <button class="btn" id="bNew">新規</button>
-      <button class="btn" id="bDup" title="今のテストをコピーして新しいテストを作る（次の学期はここから）">複製</button>
-      <button class="btn" id="bRen">名前変更</button>
-      <button class="btn danger" id="bDel">削除</button>
+      <div class="menu"><button type="button" class="btn" data-menu>テスト ▾</button>
+        <div class="menu-p">
+          <button type="button" id="bNew">新しいテストを作る</button>
+          <button type="button" id="bDup">このテストを複製する（次の学期はここから）</button>
+          <button type="button" id="bRen">名前を変える</button>
+          <hr><button type="button" id="bDel" class="danger">このテストを削除する</button>
+        </div></div>
     </div>
     <div class="spacer"></div>
     <div class="grp">
       <span class="status" id="saveStat"></span>
-      <button class="badge-bk" id="bkBadge" title="クリックでバックアップ保存"></button>
-      <button class="btn" id="bBackup">バックアップ保存</button>
-      <button class="btn" id="bLoad">読み込み</button>
-      <button class="btn" id="bHist">履歴</button>
-      <button class="btn" id="bHelp">使い方・引き継ぎ</button>
+      <button type="button" class="warnbadge" id="warnBadge" hidden title="プレビューを出して、確認することを見る"></button>
+      <div class="menu"><button type="button" class="btn" data-menu id="bData">データ ▾</button>
+        <div class="menu-p right">
+          <div class="menu-note" id="bkBadge"></div>
+          <button type="button" id="bBackup">バックアップを保存する</button>
+          <button type="button" id="bLoad">バックアップを読み込む</button>
+          <button type="button" id="bHist">履歴から前の状態に戻す</button>
+          <hr><button type="button" id="bFile">データファイル（保存先）を変える</button>
+        </div></div>
+      <button type="button" class="btn" id="bHelp">使い方</button>
     </div>
     <div class="grp sep">
-      <button class="btn primary" id="bWord">Word出力</button>
-      <button class="btn primary" id="bPrint">印刷／PDF</button>
-      <button class="btn" id="bCsv">正答CSV</button>
-      <button class="btn" id="bKeyJson" title="採点アプリに渡すための正答ファイル(JSON)">採点用JSON</button>
+      <span class="seg" id="pvSeg" title="右のプレビュー（問題用紙の見本）の大きさ"><span class="seg-l">プレビュー</span><button type="button" data-pv="big">大</button><button type="button" data-pv="small">小</button><button type="button" data-pv="none">なし</button></span>
+      <div class="menu"><button type="button" class="btn primary" data-menu>出力 ▾</button>
+        <div class="menu-p right">
+          <button type="button" id="bPrint">印刷／PDF</button>
+          <button type="button" id="bWord">Word で出力</button>
+          <hr><button type="button" id="bKeyJson" title="採点アプリに渡すための正答ファイル(JSON)">採点用JSON（採点アプリへ）</button>
+          <button type="button" id="bCsv">正答CSV</button>
+        </div></div>
     </div>
   </header>
   <div class="filebar" id="fileBar"></div>
   <div class="main">
     <section class="col"><div class="editor" id="editor"></div></section>
-    <section class="col">
+    <section class="col pvcol">
       <div class="preview" id="preview">
         <div class="ptabs">
           <button class="ptab on" data-tab="paper">問題用紙</button>
@@ -1644,7 +1680,7 @@ const NOT_ALLOWED = '編集が許可されなかったため、データファ�
 async function dfPickOpen() {
   try {
     const [hd] = await showOpenFilePicker({ id: 'testmaker', types: FILE_TYPES, multiple: false });
-    if (/バックアップ/.test(hd.name) && !confirm(`「${hd.name}」はバックアップのファイルのようです。\nこのファイルをデータファイルとして使い、これから上書きしていきますか？\n（バックアップを取り込みたいだけなら、キャンセルして上の「読み込み」を使ってください）`)) return;
+    if (/バックアップ/.test(hd.name) && !confirm(`「${hd.name}」はバックアップのファイルのようです。\nこのファイルをデータファイルとして使い、これから上書きしていきますか？\n（バックアップを取り込みたいだけなら、キャンセルして上の「データ」→「バックアップを読み込む」を使ってください）`)) return;
     if (!await ask(hd)) { alert(NOT_ALLOWED); return; }
     await dfOpenHandle(hd); $('#dlgFile').close(); toast(`データファイル「${hd.name}」を開きました`);
   } catch (e) { if (e.name !== 'AbortError') dfFail(e, 'データファイルを開けませんでした'); }
@@ -1690,8 +1726,8 @@ async function dfInit() {
 function renderFileBar() {
   const bar = $('#fileBar'), b = (label, fn, cls = '') => h('button', { type: 'button', class: 'btn small ' + cls, onclick: fn }, label);
   const nm = DF.handle ? `「${DF.handle.name}」` : '';
-  const set = (cls, ...kids) => { bar.className = 'filebar ' + cls; bar.replaceChildren(...kids); };
-  if (DF.state === 'ok') set('', `データファイル${nm}に自動で保存しています。`, b('保存先を変える', () => openFileDialog(true)));
+  const set = (cls, ...kids) => { bar.hidden = false; bar.className = 'filebar ' + cls; bar.replaceChildren(...kids); };
+  if (DF.state === 'ok') { bar.className = 'filebar'; bar.hidden = true; return; }   // うまく保存できているときは帯を出さない(上の「データファイルに保存」で分かる)
   else if (DF.state === 'need') set('warn', `⚠ データファイル${nm}をまだ開いていません。今の画面は、このブラウザの中の控えです。`, b('データファイルを開く', dfReopen, 'primary'));
   else if (DF.state === 'none') set('warn', '⚠ このブラウザの中にだけ保存しています（別のブラウザ・パソコンからは見えません）。', b('保存先のファイルを決める', () => openFileDialog(), 'primary'));
   else if (DF.state === 'error') set('bad', `⚠ データファイル${nm}に保存できませんでした（${DF.err}）。このブラウザの中には控えがあります。`, b('もう一度保存', dfRetry, 'primary'), b('保存先を変える', () => openFileDialog(true)));
@@ -1824,8 +1860,10 @@ function sectionCard(s, i, ex) {
     btn(s.collapsed ? '開く' : '閉じる', () => { s.collapsed = !s.collapsed; touch(); renderEditor(); }, '内容を折りたたむ'),
     btn('▲', () => { if (move(ex.sections, i, -1)) { touch(); renderEditor(); } }, '上へ'),
     btn('▼', () => { if (move(ex.sections, i, 1)) { touch(); renderEditor(); } }, '下へ'),
-    btn('複製', () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => { it.id = uid(); (it.figures || []).forEach(f => f.id = uid()); }); (c.figures || []).forEach(f => f.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); }, 'この大問をコピー'),
-    btn('削除', () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); touch(); renderEditor(); } }, '', 'danger'));
+    h('div', { class: 'menu' }, h('button', { type: 'button', class: 'btn small', 'data-menu': true, title: '複製・削除' }, 'その他 ▾'),
+      h('div', { class: 'menu-p right' },
+    h('button', { type: 'button', onclick: () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => { it.id = uid(); (it.figures || []).forEach(f => f.id = uid()); }); (c.figures || []).forEach(f => f.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); } }, 'この大問を複製する'),
+    h('button', { type: 'button', class: 'danger', onclick: () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); touch(); renderEditor(); } } }, 'この大問を削除する'))));
   card.append(head);
   // 画像は、この大問のどこで貼り付け(Ctrl+V)・ドラッグしても図として入る(Scratch の画面のスクリーンショットなど)
   card.addEventListener('paste', e => {
@@ -2087,6 +2125,7 @@ function refresh() {
     el.innerHTML = '<b>自動で決まった正解</b>：' + (items.length ? items.join('　／　') : '（空欄がまだありません）');
   });
   $('#countStat').textContent = `マークシート${C.answers.length}問 ・ 記述${C.written.length}問 ・ ${C.total}点`;
+  const wb = $('#warnBadge'); wb.hidden = !(ui.pv === 'none' && C.warnings.length); wb.textContent = `⚠ 確認すること ${C.warnings.length}件`;
   updateStatus();
 }
 /* ---- 〇ページに収める ----
@@ -2161,9 +2200,11 @@ function updateStatus() {
   $('#saveStat').textContent = DF.state === 'ok'
     ? (DF.writing || DF.dirty ? '保存中…' : (DF.savedAt ? `データファイルに保存 ${fmtTime(DF.savedAt)}` : 'データファイルを開きました'))
     : (saveFailed ? '⚠ 自動保存できません。必ずバックアップ保存を' : (store.savedAt ? `このブラウザに保存 ${fmtTime(store.savedAt)}` : ''));
-  const b = $('#bkBadge'), dirty = store.lastChangeAt > (store.lastBackupAt || 0);
-  b.className = 'badge-bk' + (dirty || !store.lastBackupAt ? ' dirty' : '');
-  b.textContent = !store.lastBackupAt ? 'バックアップ未実施' : (dirty ? `未バックアップの変更あり（前回 ${fmtTime(store.lastBackupAt)}）` : `バックアップ済 ${fmtTime(store.lastBackupAt)}`);
+  // バックアップの状態はデータのメニューの中に出し、未バックアップのときは「データ」ボタンを黄色にする
+  const b = $('#bkBadge'), dirty = store.lastChangeAt > (store.lastBackupAt || 0), need = dirty || !store.lastBackupAt;
+  b.className = 'menu-note' + (need ? ' dirty' : '');
+  b.textContent = !store.lastBackupAt ? 'バックアップはまだ保存していません' : (dirty ? `前回のバックアップ（${fmtTime(store.lastBackupAt)}）のあとに変更があります` : `バックアップ済み（${fmtTime(store.lastBackupAt)}）`);
+  $('#bData').classList.toggle('dirty', need);
 }
 
 /* ---- テスト一覧・各ボタン ---- */
@@ -2178,6 +2219,30 @@ function doPrint() {
   $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}</td></tr></tbody></table><div class="pfoot">${ft}</div>`;
   const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' : '_正答一覧');
   window.print(); document.title = old;
+}
+/* メニュー：▾ のボタンで開き、外を押すか中のボタンを押すと閉じる。大問の「その他」も同じしくみ */
+function setupMenus() {
+  document.addEventListener('click', e => {
+    const t = e.target.closest('[data-menu]'), open = document.querySelectorAll('.menu.open');
+    if (t) { const m = t.closest('.menu'), was = m.classList.contains('open'); open.forEach(x => x.classList.remove('open')); if (!was) m.classList.add('open'); return; }
+    open.forEach(x => x.classList.remove('open'));   // 外、または中のボタンを押した
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.menu.open').forEach(x => x.classList.remove('open')); });
+}
+/* プレビューの大きさ：大・小・なし。選んだものはこのブラウザに覚える(見た目の好みなので、データファイルには入れない) */
+function setupPreviewSize() {
+  let v = 'big'; try { v = localStorage.getItem('testmaker:preview') || 'big'; } catch (e) { }
+  document.querySelectorAll('#pvSeg [data-pv]').forEach(btn => btn.onclick = () => setPreviewSize(btn.dataset.pv));
+  $('#warnBadge').onclick = () => setPreviewSize('small');
+  setPreviewSize(v, true);
+}
+function setPreviewSize(v, quiet) {
+  if (!['big', 'small', 'none'].includes(v)) v = 'big';
+  ui.pv = v;
+  $('.main').classList.toggle('pv-small', v === 'small'); $('.main').classList.toggle('pv-none', v === 'none');
+  document.querySelectorAll('#pvSeg [data-pv]').forEach(b => b.classList.toggle('on', b.dataset.pv === v));
+  try { localStorage.setItem('testmaker:preview', v); } catch (e) { }
+  if (!quiet) { fitPreview(); refresh(); }
 }
 function setupButtons() {
   $('#examSel').addEventListener('change', e => { store.current = e.target.value; saveStore(); renderAll(); });
@@ -2198,7 +2263,9 @@ function setupButtons() {
     if (!confirm(`「${cur().name}」を削除しますか？\n（直前の状態は「履歴」に残ります）`)) return;
     snapshot(true, '削除前'); store.exams = store.exams.filter(e => e.id !== store.current); store.current = store.exams[0].id; store.lastChangeAt = Date.now(); saveStore(); renderAll();
   };
-  $('#bBackup').onclick = exportBackup; $('#bkBadge').onclick = exportBackup;
+  $('#bBackup').onclick = exportBackup;
+  $('#bFile').onclick = () => fsSupported() ? openFileDialog(true) : alert('このブラウザは、ファイルへの保存に対応していません。Chrome か Edge で開いてください。');
+  setupMenus(); setupPreviewSize();
   $('#bLoad').onclick = () => $('#fileIn').click();
   $('#fileIn').onchange = e => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ''; };
   $('#dictIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const fr = new FileReader();
@@ -2243,7 +2310,9 @@ function helpHTML() {
 <h4>基本の流れ</h4>
 <ul><li>左で大問を作る（語群選択／選択問題／正誤／記述）。右にその場で用紙が出ます。</li>
 <li>番号（１）（２）…・記号（ア）（イ）…・正答は<b>すべて自動</b>です。問題の順番を入れ替えても番号は付け直されます。</li>
-<li>「Word出力」→ 細かい手直しをしたいとき／「印刷／PDF」→ そのまま印刷・PDF保存／「正答CSV」→ 採点用の正答表。</li>
+<li>右上の<b>「出力」</b>から：「印刷／PDF」→ そのまま印刷・PDF保存／「Word で出力」→ 細かい手直しをしたいとき／「採点用JSON」→ 採点アプリへ／「正答CSV」→ 正答の表。</li>
+<li>テストの新規・複製・名前・削除は「テスト」、バックアップ・読み込み・履歴・保存先は「データ」にまとめてあります（未バックアップの変更があると「データ」が黄色になります）。</li>
+<li>右のプレビュー（問題用紙の見本）は、上の「プレビュー　大・小・なし」で大きさを変えられます。編集に集中したいときは「小」か「なし」に。「なし」のときに確かめることがあると、上に「⚠ 確認すること」が出ます。</li>
 <li>画面の「確認してください」に出る警告（正解の未設定・選択肢数オーバーなど）を消してから出力します。</li></ul>
 <h4>語群選択の書き方</h4>
 <ul><li>本文の空欄にしたい語句を選んで「選択した語句を空欄にする」。<code>{{語句}}</code> と書いても同じです。</li>
@@ -2278,15 +2347,15 @@ function helpHTML() {
 <li>フォントは基本設定で選びます。教科書体は「UD デジタル 教科書体」（Windows10以降に標準搭載）。入っていないパソコンではWord／印刷とも別の字体になります。</li></ul>
 <h4>データの保存（データファイル）</h4>
 <ul><li>作ったテストは、データファイル（<code>${DATA_FILE_NAME}</code>）に<b>自動で</b>保存します。<b>TestMaker.html と同じフォルダ</b>に置くと、別のパソコン・ブラウザでも同じデータを使えます。</li>
-<li>はじめて開いたときに「データファイルを新しく作る」か「データファイルを開く」を選びます。あとから変えるときは、画面上の帯の「保存先を変える」。</li>
+<li>はじめて開いたときに「データファイルを新しく作る」か「データファイルを開く」を選びます。あとから変えるときは、「データ」→「データファイル（保存先）を変える」。</li>
 <li>開き直したとき、ブラウザが「このファイルの編集を許可しますか？」とたずねることがあります。<b>「ファイルを編集」（または「許可」）</b>を押してください。</li>
 <li>画面上の帯が黄色・赤のときは、データファイルに保存できていません。帯のボタンを押してください。</li>
 <li>同じデータファイルを2つの画面で同時に直さないでください。別の所で変更されたときは、上書きせずに止めてお知らせします。</li></ul>
 <h4>バックアップ</h4>
 <ul><li>データファイルとは別に、ブラウザの中にも控えを残しています（履歴は10分ごと・40件。データファイルにも入ります）。</li>
-<li><b>学期ごと・大きく編集したあとに「バックアップ保存」</b>→ 日付入りのJSONファイルを校務共有サーバー等に置いてください。別のパソコンでも「読み込み」で再開できます。</li>
+<li><b>学期ごと・大きく編集したあとに「データ」→「バックアップを保存する」</b>→ 日付入りのJSONファイルを校務共有サーバー等に置いてください。別のパソコンでも「データ」→「バックアップを読み込む」で再開できます。</li>
 <li>読み込みは「新しいテストとして追加」なので、今のデータは上書きされません。</li>
-<li>次の学期は「複製」から始めると、設定と問題の形をそのまま使えます。</li></ul>
+<li>次の学期は「テスト」→「このテストを複製する」から始めると、設定と問題の形をそのまま使えます。</li></ul>
 <h4>引き継ぎ担当者向け</h4>
 <ul><li>基本はこのHTML1ファイルだけで動きます（Chrome／Edge推奨・ネット不要）。自動ルビだけ、同じフォルダの <code>ruby-engine.js</code>（kuromoji＋IPAdic辞書、約24MB）を使います。これが無くても他の機能は動きます。作り直し方は tools/build-ruby-engine.js の先頭に書いてあります。</li>
 <li>先頭のコメントに構成が書いてあります。計算は <code>compile()</code>、見た目は <code>renderPaperHTML()</code>（画面・印刷）と <code>buildDocx()</code>（Word）。</li>
@@ -2382,7 +2451,7 @@ function openRubyDialog() {
       body.append(h('div', { class: 'row', style: 'margin-bottom:6px' }, btn('辞書をファイルに保存', () => {
           download(new Blob([JSON.stringify({ app: 'testmaker-dict', words: store.userDict }, null, 1)], { type: 'application/json' }), `ルビ辞書_${stamp()}.json`); }, '他の先生に渡す・別のPCで使うとき'),
         btn('辞書ファイルを読み込む', () => $('#dictIn').click(), '足りない語だけ追加します（既存の登録は上書きしません）')),
-        h('p', { class: 'hint' }, '辞書は「バックアップ保存」にも含まれます。'), q, tb);
+        h('p', { class: 'hint' }, '辞書はバックアップにも含まれます。'), q, tb);
     }
     dlg.replaceChildren(body);
   };
