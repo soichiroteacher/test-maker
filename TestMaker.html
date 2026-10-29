@@ -33,6 +33,7 @@
       (体裁を変えたい → renderPaperHTML と buildDocx を直す)
    5. 保存(storage)・バックアップ・履歴
    6. 画面(editor)         … 入力フォーム。ここは見た目だけ。計算はしない
+   ★ ブロックの欄: blockTree(書き方→木) / blocksSVG(画面・印刷) / blocksPng(Word)。コードの欄の「種類」で選ぶ。
    ★ 自動ルビ: rubySegs()（優先順 手書き→登録辞書→自動）。辞書エンジンは別ファイル ruby-engine.js（無くても他は動く）
    ★ 新しい問題の種類を足すとき: newSection / compile / 各render / editor に1つずつ足す。
 
@@ -129,7 +130,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .figed .thumb.miss{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--danger);border-style:dashed}
 .figed-b{flex:1;min-width:0}
 .figed input.grow{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
-.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
+.sub input.w5,.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 .addbar{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 40px}
 
 /* ---- preview ---- */
@@ -190,6 +191,8 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .code .ct{white-space:pre-wrap;word-break:break-all}
 .code .blank{font-family:inherit}
 .ruby-on .code{line-height:1.8}
+.blocks{margin:2mm 0;break-inside:avoid}
+.blocks svg{display:block;max-width:100%;height:auto}
 .figrow{display:flex;gap:4mm;align-items:flex-start}
 .figmain{flex:1;min-width:0}
 .figside{flex:none;display:flex;flex-direction:column;gap:3mm;margin-top:1mm}
@@ -317,10 +320,11 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 4;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 5;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
+                                        // 5(2026-10-29): コードの欄の種類(codeKind: text|blocks)とブロックの大きさ(blockScale)を追加
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -340,6 +344,7 @@ const FONTS = [
 ];
 const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
 const ITEM_FIG_POS = { below: '問題文の下', right: '問題文の右' };
+const CODE_KIND = { text: '文字のコード', blocks: 'ブロック（MakeCode のような）' };
 const CODE_POS = { before: '本文の前', after: '本文の後' };
 const CODE_FONT = 'BIZ UDゴシック';     // コードの欄の字(等幅。Windows10以降に標準搭載)。字の幅がそろうので字下げが崩れない
 const IMG_MAX = 1600;                    // 画像を読み込むときの長い辺の上限(px)。A4に印刷しても線がつぶれない程度。容量を抑えるため
@@ -445,7 +450,8 @@ function newItem(type) {
 function newSection(type) {
   // figures: [{id, img(store.images の id), caption(見出し), width(用紙の幅の%), gray(白黒にする)}]  figPos: above|below|right(本文の上/下/右)
   // code: null(コードの欄なし) または プログラムの文字列。codePos: before|after(本文の前/後)。codeLines: 行番号を付けるか
-  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above', code: null, codePos: 'before', codeLines: true };
+  // codeKind: text(文字のコード)|blocks(ブロックの欄)。blockScale: ブロックの大きさ(%)
+  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above', code: null, codePos: 'before', codeLines: true, codeKind: 'text', blockScale: 100 };
   if (type === 'blank')   return { ...base, text: '', distract: '', order: 'shuffle', seed: Math.floor(Math.random()*1e9), manual: '',
                                   bankNote: '※　同じ語句を何度使っても良い。使わない語句もある。' };
   if (type === 'choice')  return { ...base, items: [newItem('choice')] };
@@ -475,6 +481,7 @@ function migrate(ex) {
     if (!FIG_POS[m.figPos]) m.figPos = 'above';
     if (typeof m.code !== 'string') m.code = null;
     if (!CODE_POS[m.codePos]) m.codePos = 'before';
+    if (!CODE_KIND[m.codeKind]) m.codeKind = 'text';
     return m;
   });
   return ex;
@@ -538,16 +545,180 @@ function sampleExam() {
   s7.lead = '次のプログラムについて、空欄に当てはまるものを語群の中から選びなさい。';
   s7.code = 'total = 0\nfor i in range(1, {{11}}):\n    total = total + {{i}}\n{{print}}(total)';
   s7.codePos = 'before';
-  ex.sections = [s1, s2, s3, s4, s5, s6, s7];
+  const s8 = B('プログラミング・ブロック（見本）', 'このプログラムは、ボタンＡを押している間だけ「５」を表示します。', 'B\nアイコンを表示\n文字列を表示', 808);
+  s8.lead = '次のマイクロビットのプログラムについて、空欄に当てはまるものを語群の中から選びなさい。';
+  s8.code = '最初だけ\n  アイコンを表示 ♥\nずっと\n  もし <ボタン {{A}} が押されている> なら\n    {{数を表示}} (5)\n  でなければ\n    表示を消す\n  一時停止（ミリ秒） (100)';
+  s8.codeKind = 'blocks'; s8.codePos = 'before';
+  ex.sections = [s1, s2, s3, s4, s5, s6, s7, s8];
   return migrate(ex);   // 足りない項目(設問の図など)を、読み込んだデータと同じように補う
 }
 
 /* コードの欄：書いたとおりの行(空行・字下げもそのまま。タブは空白4つ)。中身が空なら出さない */
-function codeOf(s, tokLine) {
+function codeOf(s, tokLine) {   // ブロックの欄も同じ行の形にしてから、compile で木にする(blockTree)
   if (s.code == null || !s.code.trim()) return null;
   const lines = s.code.replace(/\t/g, '    ').replace(/\s+$/, '').split(/\r?\n/).map(l => l.replace(/\s+$/, ''));
   while (lines.length && !lines[0].trim()) lines.shift();
   return { lines: lines.map(tokLine), ln: !!s.codeLines };
+}
+
+/* =====================================================================
+   ブロックの欄(MakeCode のようなビジュアルプログラミング)
+   書き方：1行1ブロック。字下げ(空白)= 上のブロックの中。形は並び方で決める(言葉の辞書は持たない)。
+     字下げなしで中身あり = イベント(上が丸い・太い枠)、字下げありで中身あり = コの字、
+     「もし…なら」と同じ字下げの「でなければ…」= コの字を2段に、それ以外 = ふつうのブロック。
+     (100) = 値の枠(丸)、<…> = 条件の枠(六角形)、{{答え}} = 空欄、[漢字|かな] = ルビ。
+   白黒印刷が前提なので、白地＋黒い線だけで描き、形と線の太さで区別する(灰色の塗りは使わない)。
+   画面・印刷はこの SVG をそのまま、Word は同じ絵を canvas で描いた PNG にして入れる。
+   ===================================================================== */
+/* 行(空欄の処理まで済んだもの)→ ブロックの木。node = { arms: [{ segs, kids }] }(arms が2つ以上 = でなければ付き) */
+function blockTree(lines) {
+  const root = { arms: [{ kids: [] }] }, stack = [{ ind: -1, arm: root.arms[0] }];
+  lines.forEach(toks => {
+    const first = toks[0] && toks[0].t === 'text' ? toks[0].v : '';
+    const ind = first.length - first.trimStart().length;
+    const tk = toks.map((t, i) => i === 0 && t.t === 'text' ? { ...t, v: t.v.trimStart() } : t).filter(t => t.t !== 'text' || t.v);
+    if (!tk.length) return;
+    while (stack.length > 1 && stack[stack.length - 1].ind >= ind) stack.pop();
+    const sibs = stack[stack.length - 1].arm.kids, prev = sibs[sibs.length - 1];
+    const head = tk[0].t === 'text' ? plain(tk[0].v).trim() : '';
+    if (/^でなければ/.test(head) && prev && prev.arms[0].kids.length) {   // 前の「もし」の2段目にする
+      const arm = { segs: slotParse(tk), kids: [] }; prev.arms.push(arm); stack.push({ ind, arm }); return;
+    }
+    const node = { arms: [{ segs: slotParse(tk), kids: [] }] };
+    sibs.push(node); stack.push({ ind, arm: node.arms[0] });
+  });
+  return root.arms[0].kids;
+}
+/* 行の中の ( ) と < > を枠にする。対応する閉じ記号がないものは、ただの文字のまま */
+function slotParse(toks) {
+  const items = [];
+  toks.forEach(t => t.t === 'text' ? items.push(...t.v) : items.push(t));
+  const match = new Map(), st = [];
+  items.forEach((c, i) => {
+    if (c === '(' || c === '<') st.push(i);
+    else if ((c === ')' || c === '>') && st.length && (items[st[st.length - 1]] === '(') === (c === ')')) match.set(st.pop(), i);
+  });
+  const trim = a => { if (a[0] && a[0].t === 'text') a[0].v = a[0].v.trimStart(); const l = a[a.length - 1]; if (l && l.t === 'text') l.v = l.v.trimEnd(); return a.filter(x => x.t !== 'text' || x.v); };
+  const build = (a, b) => {
+    const out = []; let buf = '';
+    const flush = () => { if (buf) { out.push({ t: 'text', v: buf }); buf = ''; } };
+    for (let i = a; i < b; i++) {
+      const c = items[i];
+      if (typeof c !== 'string') { flush(); out.push(c); continue; }
+      if (match.has(i)) { flush(); out.push({ t: 'slot', kind: c === '(' ? 'num' : 'bool', kids: trim(build(i + 1, match.get(i))) }); i = match.get(i); continue; }
+      buf += c;
+    }
+    flush(); return out;
+  };
+  return trim(build(0, items.length));
+}
+const MEAS = document.createElement('canvas').getContext('2d');   // 字の幅を測る
+/* ブロックの木 → SVG の文字列。字の大きさは用紙の字と同じ(m.size pt) */
+function blocksSVG(cd, m) {
+  const F = m.size * 4 / 3, ff = fontCss(m.font), rb = RUBY;
+  const tw = (s, sz = F, b) => { MEAS.font = `${b ? 'bold ' : ''}${sz}px ${ff}`; return MEAS.measureText(s).width; };
+  const SH = F * 1.45 + (rb ? F * 0.5 : 0);        // 値の枠・空欄の高さ
+  const RH = SH + F * 0.75;                        // ブロック1段の高さ
+  const PX = F * 0.6, ARM = F * 1.4, BOT = F * 0.9, GAP = F * 0.3, HAT = F * 0.8, M = 3;
+  // out = SVG(画面・印刷用)、ops = 同じ絵を canvas に描くための手順(Word 用の PNG。blocksPng)
+  const out = [], ops = [], n1 = v => v.toFixed(1);
+  const T = (x, y, s, sz = F, b) => { out.push(`<text x="${n1(x)}" y="${n1(y)}" font-size="${n1(sz)}"${b ? ' font-weight="bold"' : ''}>${X(s)}</text>`); ops.push({ t: 'text', x, y, s, sz, b }); };
+  const RC = (x, y, w, h, rx, sw) => { out.push(`<rect x="${n1(x)}" y="${n1(y)}" width="${n1(w)}" height="${n1(h)}"${rx ? ` rx="${n1(rx)}"` : ''} fill="#fff" stroke="#000" stroke-width="${sw}"/>`); ops.push({ t: 'rect', x, y, w, h, rx, sw }); };
+  const PA = (d, sw) => { out.push(`<path d="${d}" fill="#fff" stroke="#000" stroke-width="${sw}" stroke-linejoin="round"/>`); ops.push({ t: 'path', d, sw }); };
+  const segsOf = v => rb ? rubySegs(v) : [{ t: plain(v), r: null }];
+  const textW = v => segsOf(v).reduce((a, g) => a + Math.max(tw(g.t), g.r ? tw(g.r, F * 0.5) : 0), 0);
+  const base = cy => cy + F * 0.36 + (rb ? F * 0.22 : 0);
+  const blankLab = sg => `（${sg.n == null ? '？' : sg.n}）`;
+  const slotH = d => SH - d * F * 0.3;
+  const segW = (sg, d) => {
+    if (sg.t === 'text') return textW(sg.v);
+    if (sg.t === 'blank') return tw(blankLab(sg), F, true) + F * 0.4 + F * 0.2;
+    const h = slotH(d), pad = sg.kind === 'num' ? F * 0.5 : h / 2 + F * 0.2;
+    return Math.max(sg.kids.reduce((a, k) => a + segW(k, d + 1), 0) + pad * 2, F * 1.6) + F * 0.2;
+  };
+  const drawSeg = (sg, x, cy, d) => {
+    if (sg.t === 'text') {
+      segsOf(sg.v).forEach(g => {
+        const bw = tw(g.t), rw = g.r ? tw(g.r, F * 0.5) : 0, w = Math.max(bw, rw);
+        T(x + (w - bw) / 2, base(cy), g.t); if (g.r) T(x + (w - rw) / 2, base(cy) - F * 1.0, g.r, F * 0.5);
+        x += w;
+      });
+      return;
+    }
+    const w = segW(sg, d) - F * 0.2, x0 = x + F * 0.1;
+    if (sg.t === 'blank') {
+      const bh = slotH(d) - F * 0.1;
+      RC(x0, cy - bh / 2, w, bh, 0, 1.8);
+      const lw = tw(blankLab(sg), F, true); T(x0 + (w - lw) / 2, cy + F * 0.36, blankLab(sg), F, true);
+      return;
+    }
+    const h = slotH(d), pad = sg.kind === 'num' ? F * 0.5 : h / 2 + F * 0.2, t = cy - h / 2;
+    if (sg.kind === 'num') RC(x0, t, w, h, h / 2, 1.1);
+    else PA(`M${n1(x0)},${n1(cy)} L${n1(x0 + h / 2)},${n1(t)} H${n1(x0 + w - h / 2)} L${n1(x0 + w)},${n1(cy)} L${n1(x0 + w - h / 2)},${n1(t + h)} H${n1(x0 + h / 2)} Z`, 1.1);
+    const inner = sg.kids.reduce((a, k) => a + segW(k, d + 1), 0);
+    let kx = x0 + Math.max(pad, (w - inner) / 2);
+    sg.kids.forEach(k => { drawSeg(k, kx, cy, d + 1); kx += segW(k, d + 1); });
+  };
+  const rowW = segs => PX * 2 + segs.reduce((a, s) => a + segW(s, 0), 0);
+  const drawRow = (segs, x, y) => { let sx = x + PX; segs.forEach(s => { drawSeg(s, sx, y + RH / 2, 0); sx += segW(s, 0); }); };
+  const lay = (node, top) => {
+    const isC = node.arms.length > 1 || node.arms[0].kids.length > 0;
+    if (!isC) {
+      const w = Math.max(rowW(node.arms[0].segs), F * 3);
+      return { w, h: RH, draw: (x, y) => {
+        RC(x, y, w, RH, F * 0.25, 1.4);
+        drawRow(node.arms[0].segs, x, y);
+      } };
+    }
+    const hat = top ? HAT : 0;
+    const arms = node.arms.map(a => {
+      const kids = a.kids.map(k => lay(k, false));
+      const bh = kids.length ? kids.reduce((s, k) => s + k.h, 0) + GAP * (kids.length + 1) : F * 1.1;
+      return { a, kids, bh, hw: rowW(a.segs) };
+    });
+    const w = Math.max(F * 6, ...arms.map(r => r.hw), ...arms.map(r => ARM + Math.max(0, ...r.kids.map(k => k.w)) + F * 0.6));
+    const h = hat + arms.reduce((s, r) => s + RH + r.bh, 0) + BOT;
+    return { w, h, draw: (x, y) => {
+      // 外形：イベントは上が丸く(帽子の形)、太い枠。コの字は、中身の左に腕を残してくり抜く
+      let d = top ? `M${n1(x)},${n1(y + hat)} Q${n1(x + F * 2.2)},${n1(y - hat * 0.9)} ${n1(x + F * 4.6)},${n1(y + hat)} H${n1(x + w)}` : `M${n1(x)},${n1(y)} H${n1(x + w)}`;
+      let cy = y + hat;
+      arms.forEach(r => { d += ` V${n1(cy + RH)} H${n1(x + ARM)} V${n1(cy + RH + r.bh)} H${n1(x + w)}`; cy += RH + r.bh; });
+      d += ` V${n1(cy + BOT)} H${n1(x)} Z`;
+      PA(d, top ? 2.4 : 1.4);
+      cy = y + hat;
+      arms.forEach(r => {
+        drawRow(r.a.segs, x, cy);
+        let ky = cy + RH + GAP;
+        r.kids.forEach(k => { k.draw(x + ARM, ky); ky += k.h + GAP; });
+        cy += RH + r.bh;
+      });
+    } };
+  };
+  const tops = cd.tree.map(nd => lay(nd, nd.arms.length > 1 || nd.arms[0].kids.length > 0));
+  const W = Math.ceil(Math.max(F * 4, ...tops.map(t => t.w)) + M * 2 + 2);
+  let y = M + 2;
+  tops.forEach(t => { t.draw(M, y); y += t.h + F * 0.8; });
+  const H = Math.ceil(y - F * 0.8 + M);
+  return { w: W, h: H, ops, ff, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${X(ff.replace(/"/g, "'"))}"><rect width="${W}" height="${H}" fill="#fff"/>${out.join('')}</svg>` };
+}
+function blocksHTML(cd, m) {   // 画面・印刷：大きさ(%)は表示の幅で変える。用紙より広ければ CSS で縮む
+  const b = blocksSVG(cd, m);
+  return `<div class="blocks">${b.svg.replace('<svg ', `<svg style="width:${Math.round(b.w * cd.scale / 100)}px" `)}</div>`;
+}
+/* ブロックの絵 → PNG(Word 用)。k 倍の細かさで canvas に直接描く。
+   SVG を画像として読み込むより、字の幅を測ったのと同じ canvas・同じ字体で描く方が確実なため */
+async function blocksPng(cd, m, k) {
+  const b = blocksSVG(cd, m), cv = document.createElement('canvas');
+  cv.width = Math.round(b.w * k); cv.height = Math.round(b.h * k);
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height);
+  g.scale(k, k); g.lineJoin = 'round'; g.strokeStyle = '#000';
+  b.ops.forEach(o => {
+    if (o.t === 'text') { g.font = `${o.b ? 'bold ' : ''}${o.sz}px ${b.ff}`; g.fillStyle = '#000'; g.fillText(o.s, o.x, o.y); return; }
+    let p; if (o.t === 'path') p = new Path2D(o.d); else { p = new Path2D(); if (o.rx) p.roundRect(o.x, o.y, o.w, o.h, o.rx); else p.rect(o.x, o.y, o.w, o.h); }
+    g.fillStyle = '#fff'; g.fill(p); g.lineWidth = o.sw; g.stroke(p);
+  });
+  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: 'png', w: cv.width, h: cv.height, cssW: b.w };
 }
 
 /* =====================================================================
@@ -682,6 +853,10 @@ function compile(exam) {
       sec.code = codeOf(s, line => [{ t: 'text', v: line }]);
       if (sec.code && /\{\{/.test(s.code)) W(si, 'コードの欄の {{ }} は、語群選択の大問でだけ空欄になります（この大問ではそのまま表示します）');
     }
+    if (sec.code && s.codeKind === 'blocks') {
+      Object.assign(sec.code, { kind: 'blocks', tree: blockTree(sec.code.lines), scale: Math.min(200, Math.max(30, num(s.blockScale, 100))), key: 'blocks:' + s.id });
+      if (!sec.code.tree.length) sec.code = null;
+    }
     C.sections.push(sec);
   });
   C.total = C.answers.reduce((a, b) => a + b.points, 0) + C.written.reduce((a, b) => a + b.points, 0);
@@ -762,7 +937,7 @@ function renderPaperHTML(C, force) {
           `<div class="ansbox" style="height:${it.lines * 9}mm"></div>`);
       });
     }
-    if (sec.code) main = sec.codePos === 'before' ? codeHTML(sec.code) + main : main + codeHTML(sec.code);
+    if (sec.code) { const ch = sec.code.kind === 'blocks' ? blocksHTML(sec.code, m) : codeHTML(sec.code); main = sec.codePos === 'before' ? ch + main : main + ch; }
     const F = sec.figs;
     if (!F.length) h += main + after;
     else if (sec.figPos === 'above') h += figsHTML(F) + main + after;
@@ -892,6 +1067,11 @@ const docxImgKey = f => f.img + (f.gray ? '|白黒' : '');
    SVG(見本の図)は Word で開けないことがあるので PNG に、「白黒にする」の図は白黒にした画像にする(画面のような CSS の白黒は Word にないため) */
 async function docxImages(C) {
   const out = new Map();
+  // ブロックの欄：3倍の細かさの PNG に。ルビはテストの設定に合わせる(buildDocx と同じ決め方)
+  RUBY = !!C.meta.showRuby; AUTO = RUBY && !!C.meta.autoRuby;
+  for (const sec of C.sections) if (sec.code && sec.code.kind === 'blocks') {
+    try { out.set(sec.code.key, await blocksPng(sec.code, C.meta, 3)); } catch (e) { console.warn(e); }
+  }
   for (const f of C.figs || []) {
     const key = docxImgKey(f); if (!f.ok || out.has(key)) continue;
     const im = getImg(f.img);
@@ -927,8 +1107,16 @@ function buildDocx(C, imgs = new Map()) {
   const body = [];
   // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
   const media = [], mediaOf = new Map(); let drawN = 0;
+  const mediaFor = im => { if (!mediaOf.has(im)) { const n = media.length + 1; media.push({ name: `image${n}.${im.ext}`, rid: 'rIdImg' + n, im }); mediaOf.set(im, media[media.length - 1]); } return mediaOf.get(im); };
   // コードの欄：枠線の表(1マス)に、1行を1段落で入れる。等幅の字なので字下げは空白のまま。行番号は桁をそろえて前に付ける
   const codeXml = (cd, fw) => {
+    if (cd.kind === 'blocks') {   // ブロックの欄：描いた絵(PNG)を入れる。1px = 15 twip(96dpi)
+      const im = imgs.get(cd.key);
+      if (!im) return P(R('（ブロックの図を作れませんでした）'), { box: true });
+      let w = Math.round(im.cssW * 15 * cd.scale / 100); if (w > fw - 100) w = fw - 100;
+      const h = Math.round(w * im.h / im.w);
+      return P(drawingXml(mediaFor(im).rid, w * 635, h * 635, ++drawN), { before: 60, after: 80 });
+    }
     const dg = String(cd.lines.length).length, cs = sz - 1;
     const ps = cd.lines.map((toks, i) => P([
       ...(cd.ln ? [R(String(i + 1).padStart(dg, ' ') + '  ', { font: CODE_FONT, sz: cs })] : []),
@@ -959,8 +1147,7 @@ function buildDocx(C, imgs = new Map()) {
     const cap = P(RR('図' + zen(f.no) + (f.caption ? '　' + f.caption : ''), { sz: sz - 1 }), { jc: 'center', line: 300, after: 60 });
     const im = imgs.get(docxImgKey(f));
     if (!im) return P(R(`（図${zen(f.no)}の画像がありません）`), { jc: 'center', box: true, keepNext: true }) + cap;
-    if (!mediaOf.has(im)) { const n = media.length + 1; media.push({ name: `image${n}.${im.ext}`, rid: 'rIdImg' + n, im }); mediaOf.set(im, media[media.length - 1]); }
-    const md = mediaOf.get(im);
+    const md = mediaFor(im);
     let w = maxW, h = Math.round(w * im.h / im.w);
     if (h > 11000) { w = Math.round(w * 11000 / h); h = 11000; }        // 縦長の図が1ページに入るように
     return P(drawingXml(md.rid, w * 635, h * 635, ++drawN), { jc: 'center', keepNext: true }) + cap;   // 1 twip = 635 EMU
@@ -1650,13 +1837,16 @@ function figPanel(s, item) {
 function codePanel(s) {
   if (s.code == null) return h('div', { class: 'row', style: 'margin:4px 0' },
     btn('＋ コードの欄を追加', () => { s.code = ''; touch(); renderEditor(); }, 'プログラムを、書いたとおりの字下げで枠に入れて出します'));
-  const ta = h('textarea', { rows: 6, class: 'codeta', spellcheck: 'false', wrap: 'off', placeholder: '例）\ntotal = 0\nfor i in range(1, 11):\n    total = total + i' });
+  const bk = s.codeKind === 'blocks';
+  const ta = h('textarea', { rows: bk ? 8 : 6, class: 'codeta' + (bk ? ' blockta' : ''), spellcheck: 'false', wrap: 'off',
+    placeholder: bk ? '例）\n最初だけ\n  アイコンを表示 ♥\nずっと\n  もし <ボタンAが押されている> なら\n    数を表示 (5)\n  でなければ\n    表示を消す' : '例）\ntotal = 0\nfor i in range(1, 11):\n    total = total + i' });
   ta.value = s.code;
   ta.addEventListener('input', () => { s.code = ta.value; touch(); });
   ta.addEventListener('keydown', e => {   // Tab で字下げ(空白4つ)。ふつうは次の入力欄へ移ってしまうため
     if (e.key !== 'Tab' || e.shiftKey) return;
     e.preventDefault(); const a = ta.selectionStart, b = ta.selectionEnd;
-    ta.value = ta.value.slice(0, a) + '    ' + ta.value.slice(b); ta.setSelectionRange(a + 4, a + 4); s.code = ta.value; touch();
+    const sp = bk ? '  ' : '    ';   // ブロックは空白2つで1段
+    ta.value = ta.value.slice(0, a) + sp + ta.value.slice(b); ta.setSelectionRange(a + sp.length, a + sp.length); s.code = ta.value; touch();
   });
   const toBlank = () => {
     const a = ta.selectionStart, b = ta.selectionEnd;
@@ -1670,10 +1860,14 @@ function codePanel(s) {
   ln.addEventListener('change', () => { s.codeLines = ln.checked; touch(); });
   return h('div', { class: 'sub' },
     h('div', { class: 'qhead' }, h('b', {}, 'コードの欄（プログラム）'), h('span', { class: 'spacer' }),
+      h('label', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint', style: 'margin:0' }, '種類'), bindSelect(s, 'codeKind', Object.entries(CODE_KIND), { redraw: true })),
       h('label', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint', style: 'margin:0' }, '置き場所'), bindSelect(s, 'codePos', Object.entries(CODE_POS))),
-      h('label', { class: 'row', style: 'gap:4px' }, ln, '行番号'),
+      bk ? h('label', { class: 'row', style: 'gap:4px' }, '大きさ', bindText(s, 'blockScale', { type: 'number', min: 30, max: 200, step: 10, cls: 'w5' }), '%')
+         : h('label', { class: 'row', style: 'gap:4px' }, ln, '行番号'),
       btn('コードの欄を消す', () => { if (s.code.trim() && !confirm('コードの欄を消しますか？\n（直前の状態は「履歴」に残ります）')) return; snapshot(true, 'コードの欄の削除前'); s.code = null; touch(); renderEditor(); }, '', 'danger')),
     ta,
+    bk ? h('div', { class: 'hint' }, '1行に1つのブロック。中に入るブロックは、空白2つ（Tab キー）で字下げします。',
+      h('code', {}, '(100)'), ' は値の枠、', h('code', {}, '<…>'), ' は条件の枠、「もし」と同じ字下げの「でなければ」は2段のブロックになります。ルビ ', h('code', {}, '[漢字|かな]'), ' も使えます。') : null,
     s.type === 'blank'
       ? h('div', { class: 'row', style: 'margin-top:4px' },
           h('button', { type: 'button', class: 'btn small primary', onmousedown: e => e.preventDefault(), onclick: toBlank }, '選択した部分を空欄にする'),
@@ -1700,7 +1894,7 @@ document.addEventListener('focusin', e => { if (e.target.matches && e.target.mat
 function addRuby() {
   const f = lastField;
   if (!f || !document.contains(f)) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
-  if (f.classList.contains('codeta')) { toast('コードの欄にはルビを付けられません（書いたとおりに出すため）'); return; }
+  if (f.classList.contains('codeta') && !f.classList.contains('blockta')) { toast('文字のコードの欄にはルビを付けられません（書いたとおりに出すため）'); return; }
   const a = f.selectionStart, b = f.selectionEnd;
   if (a == null || a === b) { toast('ルビを付けたい語句を、入力欄の中で選択してから押してください'); return; }
   const sel = f.value.slice(a, b);
@@ -1859,7 +2053,8 @@ function helpHTML() {
 <h4>コードの欄（プログラム）</h4>
 <ul><li>大問の「＋ コードの欄を追加」で、プログラムを書く欄が出ます。字下げは書いたとおりに、字の幅がそろった字体で、枠に囲んで出ます（Tab キーで空白4つ）。</li>
 <li>語群選択の大問では、コードの中も <code>{{答え}}</code> で空欄にできます（「選択した部分を空欄にする」）。番号・語群・正答は本文と同じく自動で付きます。</li>
-<li>置き場所（本文の前／後）と、行番号を付けるかを選べます。コードの欄にはルビは付きません。</li></ul>
+<li>置き場所（本文の前／後）と、行番号を付けるかを選べます。文字のコードの欄にはルビは付きません。</li>
+<li><b>種類を「ブロック」にすると、MakeCode のようなブロックの絵になります。</b>1行に1つのブロックを書き、中に入るブロックは空白2つ（Tab キー）で字下げします。<code>(100)</code> は丸い値の枠、<code>&lt;ボタンAが押されている&gt;</code> は六角形の条件の枠、「もし」と同じ字下げの「でなければ」は2段のブロックになります。<code>{{答え}}</code> の空欄とルビも使えます。比べる記号は ＞ ＜ ≧ など全角で書いてください（半角の &lt; &gt; は枠になります）。</li></ul>
 <h4>ルビ・フォント</h4>
 <ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
 <li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
