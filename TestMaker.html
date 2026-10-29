@@ -39,6 +39,12 @@
  ■ 空欄の書き方（本文の中で）
    {{語句}}   … 空欄にする。語句が正解になり、語群に自動で入る。番号は自動。
    {{@語句}}  … 同じ大問内で先に出た「語句」の空欄と同じ番号で再登場させる。
+   〔図:見出し〕… その見出しの図の番号(テスト全体の通し番号)に置き換わる。例「〔図:回路図〕を見て」→「図３を見て」。
+
+ ■ 図(画像)
+   大問ごとに図を入れられる(ファイル選択・貼り付け・ドラッグ)。置き場所は本文の上/下/右。
+   画像の中身は store.images に1か所でまとめ、大問には id だけを持たせる(履歴で画像が増えないように)。→「画像(図)」の節
+   Word出力にはまだ図が入らない(印刷/PDFには入る)。
 =====================================================================
 -->
 <style>
@@ -108,6 +114,14 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
 .copt input[type=text]{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .blankmap{font-size:13px;color:var(--sub);background:#f8fafc;border:1px dashed var(--line);border-radius:8px;padding:6px 8px;margin-top:6px;line-height:1.7}
 .blankmap b{color:var(--ink)}
+.card.drop{outline:3px dashed var(--accent);outline-offset:2px}
+.figed{display:flex;gap:10px;align-items:flex-start;border-top:1px solid #e3e8ee;padding-top:8px;margin-top:8px}
+.figed .thumb{width:96px;height:72px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:6px;flex:none}
+.figed .thumb.gray{filter:grayscale(1)}
+.figed .thumb.miss{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--danger);border-style:dashed}
+.figed-b{flex:1;min-width:0}
+.figed input.grow{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 .addbar{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 40px}
 
 /* ---- preview ---- */
@@ -154,6 +168,17 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:15px}
 .q-c{display:grid;margin-top:.5mm}
 .q-c div{line-height:1.6;padding-right:2mm}
 .ansbox{border:1px solid #000;margin:1mm 0 0;background:#fff}
+/* 図。ページの途中で切らない。白黒印刷が前提なので、色は「白黒にする」で画面でも灰色の濃さで確かめられる */
+.figs{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:2mm 3mm;margin:2mm 0}
+.fig{margin:0;break-inside:avoid;text-align:center}
+.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+.fig img.gray{filter:grayscale(1)}
+.fig figcaption{font-size:.92em;line-height:1.5;margin-top:1mm}
+.fig-miss{border:1.5px dashed #000;padding:6mm 2mm;font-size:.9em}
+.figrow{display:flex;gap:4mm;align-items:flex-start}
+.figmain{flex:1;min-width:0}
+.figside{flex:none;display:flex;flex-direction:column;gap:3mm;margin-top:1mm}
+.ruby-on .fig figcaption{line-height:2}
 .sheet .pt{font-size:.85em;margin-left:.5em}
 .sheet ruby rt{font-size:.55em;font-weight:400;line-height:1}
 .sheet.ruby-on{line-height:2.2}
@@ -277,7 +302,8 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 1;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 2;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+                                        // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -295,6 +321,8 @@ const FONTS = [
   ['MS ゴシック','"MS Gothic","MS ゴシック",monospace'],
   ['MS 明朝','"MS Mincho","MS 明朝",serif'],
 ];
+const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
+const IMG_MAX = 1600;                    // 画像を読み込むときの長い辺の上限(px)。A4に印刷しても線がつぶれない程度。容量を抑えるため
 const TYPE_NAMES = { blank:'語群選択（空欄補充）', choice:'選択問題（問ごとの選択肢）', tf:'正誤問題', written:'記述問題' };
 
 /* ---- ユーティリティ ---- */
@@ -311,6 +339,8 @@ const vlen = s => { let n=0; for (const ch of plain(s)) n += /[\x20-\x7e]/.test(
 const hash32 = str => { let h=2166136261; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; };
 /* ルビ記法：[漢字|かんじ]。ルビ表示OFFのときは漢字だけを出す */
 const RUBY_RE = /\[([^\[\]|]+)\|([^\[\]|]*)\]/g;
+/* 図の番号の記法：〔図:見出し〕(コロンは全角でもよい) → compile で「図３」に置き換わる。{{ }} や [漢字|かな] とぶつからない括弧にした */
+const FIG_REF_RE = /〔図[:：]([^〔〕]*)〕/g;
 const plain = s => String(s).replace(RUBY_RE, '$1');
 let RUBY = false;                                   // ルビを出力するか（出力時に meta.showRuby を入れる）
 let AUTO = false;                                   // 自動ルビを使うか
@@ -391,7 +421,8 @@ function newItem(type) {
   if (type === 'written') return { id: uid(), text: '', answer: '', lines: 3, points: 3 };
 }
 function newSection(type) {
-  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false };
+  // figures: [{id, img(store.images の id), caption(見出し), width(用紙の幅の%), gray(白黒にする)}]  figPos: above|below|right(本文の上/下/右)
+  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above' };
   if (type === 'blank')   return { ...base, text: '', distract: '', order: 'shuffle', seed: Math.floor(Math.random()*1e9), manual: '',
                                   bankNote: '※　同じ語句を何度使っても良い。使わない語句もある。' };
   if (type === 'choice')  return { ...base, items: [newItem('choice')] };
@@ -412,10 +443,23 @@ function migrate(ex) {
     const d = newSection(s.type in TYPE_NAMES ? s.type : 'blank');
     const m = Object.assign(d, s);
     if (m.items) m.items = m.items.map(it => Object.assign(newItem(m.type) || {}, it, { id: it.id || uid() }));
+    m.figures = (m.figures || []).filter(f => f && f.img).map(f => Object.assign({ id: uid(), caption: '', width: 50, gray: false }, f));
+    if (!FIG_POS[m.figPos]) m.figPos = 'above';
     return m;
   });
   return ex;
 }
+
+/* アプリに入っている画像(見本のテスト用)。store.images には入れず、どのデータからも同じ id で使える */
+const svgData = svg => 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+const BUILTIN_IMAGES = {
+  'sample-flow': { w: 400, h: 560, type: 'image/svg+xml', data: svgData(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560" viewBox="0 0 400 560">
+<rect width="400" height="560" fill="#fff"/>
+<g fill="none" stroke="#000" stroke-width="4"><rect x="70" y="20" width="260" height="90" rx="10"/><rect x="70" y="235" width="260" height="90" rx="10"/><rect x="70" y="450" width="260" height="90" rx="10"/>
+<path d="M200 110V225M185 205l15 20 15-20M200 325V440M185 420l15 20 15-20"/></g>
+<g font-family="sans-serif" font-size="36" text-anchor="middle" fill="#000"><text x="200" y="78">マウス</text><text x="200" y="293">コンピュータ</text><text x="200" y="508">ディスプレイ</text></g>
+<g font-family="sans-serif" font-size="28" fill="#000"><text x="215" y="180">入力</text><text x="215" y="395">出力</text></g></svg>`) }
+};
 
 /* 付属サンプル：添付された「令和8年度1学期定期テスト」。正答は文脈から推定したもの（要確認） */
 function sampleExam() {
@@ -457,6 +501,9 @@ function sampleExam() {
     ['部活動中、自分のフォームをチェックするために動画を撮りたいと考えた。この場合、授業中ではないので、担当の先生に許可を取る必要はない。', 1],
     ['仲の良い友達がパスワードを忘れて困っていたので、助け合うために自分のパスワードを教えて一緒に使うことにした。', 1],
   ].map(([text, correct]) => ({ id: uid(), text, correct }));
+  s1.lead = '〔図:情報の流れ〕は、コンピュータでの情報の流れを表したものです。';
+  s1.figures = [{ id: uid(), img: 'sample-flow', caption: '情報の流れ', width: 30, gray: false }];
+  s1.figPos = 'right';
   ex.sections = [s1, s2, s3, s4, s5, s6];
   return ex;
 }
@@ -469,16 +516,35 @@ function compile(exam) {
   const m = exam.meta;
   const L = LABEL_SETS[m.labelSet] || LABEL_SETS.kana;
   const maxC = num(m.maxChoices, 0);
-  const C = { meta: m, labels: L, sections: [], answers: [], written: [], warnings: [], itemNo: {}, total: 0 };
+  const C = { meta: m, labels: L, sections: [], answers: [], written: [], warnings: [], itemNo: {}, figNo: {}, total: 0 };
   const W = (si, msg) => C.warnings.push({ sec: si + 1, msg });
-  let n = 0, wn = 0;
+  let n = 0, wn = 0, fk = 0;
+
+  // 図の番号：テスト全体の通し番号(大問の順 → 大問の中の図の順)。先に数えておき、本文の〔図:見出し〕を「図３」に置き換える
+  const capNo = {}; let fc = 0;
+  exam.sections.forEach((s, si) => (s.figures || []).forEach(f => {
+    fc++; const cap = plain(f.caption || '').trim(); if (!cap) return;
+    if (capNo[cap]) W(si, `図の見出し「${cap}」が2つあります。〔図:${cap}〕は前の方の図を指します`); else capNo[cap] = fc;
+  }));
+  const fr = (str, si) => String(str || '').replace(FIG_REF_RE, (_, k) => {
+    k = plain(k).trim(); const no = capNo[k];
+    if (!no) { W(si, `〔図:${k}〕の図がありません（図の見出しと同じ言葉にしてください）`); return '図？'; }
+    return '図' + zen(no);
+  });
 
   exam.sections.forEach((s, si) => {
-    const sec = { no: si + 1, id: s.id, type: s.type, title: (s.title || '').trim(), lead: (s.lead || '').trim(), notes: [], points: num(s.points, 0) };
+    const sec = { no: si + 1, id: s.id, type: s.type, title: (s.title || '').trim(), lead: fr(s.lead, si).trim(), notes: [], points: num(s.points, 0) };
     if (!sec.title) W(si, '見出しが空です');
+    sec.figPos = FIG_POS[s.figPos] ? s.figPos : 'above';
+    sec.figs = (s.figures || []).map(f => {
+      fk++; C.figNo[f.id] = fk;
+      const ok = !!getImg(f.img);
+      if (!ok) W(si, `図${fk}の画像が見つかりません（画像の入っていないファイルから読み込んだ可能性があります。図を入れ直してください）`);
+      return { no: fk, img: f.img, caption: (f.caption || '').trim(), width: Math.min(100, Math.max(10, num(f.width, 50))), gray: !!f.gray, ok };
+    });
 
     if (s.type === 'blank') {
-      const raw = (s.text || '').replace(/｛/g, '{').replace(/｝/g, '}');
+      const raw = fr(s.text, si).replace(/｛/g, '{').replace(/｝/g, '}');
       const blanks = [], last = {};
       sec.paras = raw.split(/\r?\n/).filter(l => l.trim()).map(line => {
         const toks = []; let pos = 0, mt; const re = /\{\{\s*(@?)([^{}]*?)\s*\}\}/g;
@@ -522,7 +588,7 @@ function compile(exam) {
       sec.items = (s.items || []).map(it => {
         n++; C.itemNo[it.id] = n;
         const keep = []; let corr = -1;
-        (it.choices || []).forEach((c, i) => { if (String(c).trim()) { if (i === it.correct) corr = keep.length; keep.push(String(c).trim()); } });
+        (it.choices || []).forEach((c, i) => { if (String(c).trim()) { if (i === it.correct) corr = keep.length; keep.push(fr(c, si).trim()); } });
         if (!String(it.text || '').trim()) W(si, `（${n}）の問題文が空です`);
         if (keep.length < 2) W(si, `（${n}）の選択肢が2つ未満です`);
         if (keep.length > L.length) W(si, `（${n}）の選択肢が多すぎます`);
@@ -531,7 +597,7 @@ function compile(exam) {
         else C.answers.push({ no: n, label: L[corr], text: keep[corr], points: sec.points, sec: sec.no });
         const vmax = Math.max(0, ...keep.map(vlen));
         const cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
-        return { id: it.id, n, text: (it.text || '').trim(), cols: Math.max(1, cols), choices: keep.map((t, i) => ({ label: L[i] || '？', text: t })) };
+        return { id: it.id, n, text: fr(it.text, si).trim(), cols: Math.max(1, cols), choices: keep.map((t, i) => ({ label: L[i] || '？', text: t })) };
       });
     }
 
@@ -543,7 +609,7 @@ function compile(exam) {
         const c = it.correct ? 1 : 0;
         if (!String(it.text || '').trim()) W(si, `（${n}）の文が空です`);
         C.answers.push({ no: n, label: L[c], text: c ? fl : tl, points: sec.points, sec: sec.no });
-        return { id: it.id, n, text: (it.text || '').trim() };
+        return { id: it.id, n, text: fr(it.text, si).trim() };
       });
     }
 
@@ -551,7 +617,7 @@ function compile(exam) {
       sec.items = (s.items || []).map(it => {
         wn++; C.itemNo[it.id] = '記' + wn;
         if (!String(it.text || '').trim()) W(si, `記述${wn}の問題文が空です`);
-        const o = { id: it.id, k: wn, text: (it.text || '').trim(), answer: (it.answer || '').trim(), lines: Math.max(1, Math.round(num(it.lines, 3))), points: num(it.points, 0) };
+        const o = { id: it.id, k: wn, text: fr(it.text, si).trim(), answer: (it.answer || '').trim(), lines: Math.max(1, Math.round(num(it.lines, 3))), points: num(it.points, 0) };
         C.written.push({ ...o, sec: sec.no });
         return o;
       });
@@ -566,6 +632,12 @@ function compile(exam) {
    4a. 出力：画面・印刷用HTML
    ===================================================================== */
 function fontCss(name) { return (FONTS.find(f => f[0] === name) || FONTS[0])[1]; }
+/* 図：見出しは図の下に「図３　回路図」。side=true は「本文の右」の列の中(幅は列いっぱい) */
+function figHTML(f, side) {
+  const im = f.ok ? `<img src="${imgURL(f.img)}" alt=""${f.gray ? ' class="gray"' : ''}>` : `<div class="fig-miss">（図${zen(f.no)}の画像がありません）</div>`;
+  return `<figure class="fig"${side ? '' : ` style="width:calc(${f.width}% - 3mm)"`}>${im}<figcaption>図${zen(f.no)}${f.caption ? '　' + escR(f.caption) : ''}</figcaption></figure>`;
+}
+const figsHTML = F => `<div class="figs">${F.map(f => figHTML(f)).join('')}</div>`;
 const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
 
 function headingHTML(sec, m) {
@@ -588,32 +660,41 @@ function renderPaperHTML(C, force) {
     if (sec.lead) h += `<p class="lead">${escR(sec.lead)}</p>`;
     sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
 
+    let main = '', after = '';     // main = 本文(段落・設問)、after = 語群。図は main の上・下・右に置く
     if (sec.type === 'blank') {
       sec.paras.forEach((toks, i) => {
-        h += `<p class="para${m.keepBank && i === sec.paras.length - 1 ? ' last' : ''}">` +
+        main += `<p class="para${m.keepBank && i === sec.paras.length - 1 ? ' last' : ''}">` +
           toks.map(t => t.t === 'text' ? escR(t.v) : blankHTML(t)).join('') + '</p>';
       });
       const b = sec.bank;
-      h += `<div class="bank"><div class="bank-h"><b>語群</b>${b.note ? `<span>${escR(b.note)}</span>` : ''}</div>` +
+      after += `<div class="bank"><div class="bank-h"><b>語群</b>${b.note ? `<span>${escR(b.note)}</span>` : ''}</div>` +
         `<div class="bank-g" style="grid-template-columns:repeat(${b.cols},1fr)">` +
         b.items.map(it => `<div><span class="lab">${escR(it.label)}</span>${escR(it.text)}</div>`).join('') + '</div></div>';
     }
     else if (sec.type === 'choice') {
       sec.items.forEach(it => {
-        h += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>` +
+        main += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>` +
           `<div class="q-c" style="grid-template-columns:repeat(${it.cols},auto)">` +
           it.choices.map(c => `<div><span class="lab">${escR(c.label)}</span>${escR(c.text)}</div>`).join('') + '</div></div>';
       });
     }
     else if (sec.type === 'tf') {
-      sec.items.forEach(it => h += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div></div>`);
+      sec.items.forEach(it => main += `<div class="q"><div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div></div>`);
     }
     else if (sec.type === 'written') {
       sec.items.forEach(it => {
         const pt = m.showPoints && it.points ? `<span class="pt">（${it.points}点）</span>` : '';
-        h += `<div class="q"><div class="q-t"><span class="qn">（記${it.k}）</span>${escR(it.text)}${pt}</div>` +
+        main += `<div class="q"><div class="q-t"><span class="qn">（記${it.k}）</span>${escR(it.text)}${pt}</div>` +
           `<div class="ansbox" style="height:${it.lines * 9}mm"></div></div>`;
       });
+    }
+    const F = sec.figs;
+    if (!F.length) h += main + after;
+    else if (sec.figPos === 'above') h += figsHTML(F) + main + after;
+    else if (sec.figPos === 'below') h += main + figsHTML(F) + after;
+    else {   // 右：左に本文、右に図を縦に並べる。右の列の幅は、いちばん大きい図の幅(%)
+      const w = Math.min(60, Math.max(20, ...F.map(f => f.width)));
+      h += `<div class="figrow"><div class="figmain">${main}</div><div class="figside" style="width:${w}%">${F.map(f => figHTML(f, true)).join('')}</div></div>` + after;
     }
     h += '</section>';
   });
@@ -851,28 +932,31 @@ function download(blob, name) {
 /* =====================================================================
    5. 保存(storage)・バックアップ・履歴
    ===================================================================== */
-let store = null;           // { v, current, exams:[...], snaps:[...], lastBackupAt, lastChangeAt, lastSnapAt }
+let store = null;           // { v, current, exams:[...], snaps:[...], images:{id:{data,w,h,type}}, lastBackupAt, lastChangeAt, lastSnapAt }
 let saveFailed = false;
 const cur = () => store.exams.find(e => e.id === store.current);
 
 function loadStore() {
-  try { const raw = localStorage.getItem(LS_KEY); if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.exams) && s.exams.length) { s.exams.forEach(migrate); s.snaps = s.snaps || []; s.userDict = s.userDict || {}; if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id; return s; } } } catch (e) { console.warn(e); }
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.exams) && s.exams.length) { s.exams.forEach(migrate); s.snaps = s.snaps || []; s.userDict = s.userDict || {}; s.images = {}; if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id; return s; } } } catch (e) { console.warn(e); }
   const ex = sampleExam();
-  return { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
+  return { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: {}, images: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
 }
 /* localStorage(予備)に保存し、データファイルを使っていればそちらにも書く */
 function saveStore() {
   clearTimeout(_saveT); _saveT = null;
+  gcImages();
+  if (imgsDirty) { imgsDirty = false; idbSet('images', store.images).catch(e => { console.warn(e); imgsDirty = true; }); }
   lsSave();
   DF.dirty = true; dfWrite();
   updateStatus();
 }
+// 画像は localStorage(約5MBまで)に入れず、IndexedDB(saveStore の中)に控える
 function lsSave() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(store)); saveFailed = false; store.savedAt = Date.now(); }
+  try { localStorage.setItem(LS_KEY, JSON.stringify(store, (k, v) => k === 'images' ? undefined : v)); saveFailed = false; store.savedAt = Date.now(); }
   catch (e) { saveFailed = true; console.warn(e); }
 }
 let _saveT = null;
-function saveSoon() { clearTimeout(_saveT); _saveT = setTimeout(saveStore, 500); }
+function saveSoon() { clearTimeout(_saveT); _saveT = setTimeout(saveStore, Object.keys(store.images).length ? 1500 : 500); }   // 画像があるとファイルが大きいので、書く回数を減らす
 function snapshot(force, label) {
   const now = Date.now();
   if (!force && now - (store.lastSnapAt || 0) < 10 * 60 * 1000) return;
@@ -887,7 +971,7 @@ function touch() {
 
 function exportBackup() {
   store.exams.forEach(e => e.schema = SCHEMA);
-  const data = { app: 'testmaker', schema: SCHEMA, exportedAt: new Date().toISOString(), exams: store.exams, userDict: store.userDict };
+  const data = { app: 'testmaker', schema: SCHEMA, exportedAt: new Date().toISOString(), exams: store.exams, userDict: store.userDict, images: pickImages(usedImageIds(store.exams)) };
   download(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }), `テスト問題メーカー_バックアップ_${stamp()}.json`);
   store.lastBackupAt = Date.now(); saveStore(); toast('バックアップを保存しました（ダウンロードフォルダを確認。Googleドライブ等にも置いてください）');
 }
@@ -897,6 +981,7 @@ function importBackup(file) {
     try {
       const d = JSON.parse(fr.result);
       if (d.userDict) Object.keys(d.userDict).forEach(k => { if (!(k in store.userDict)) store.userDict[k] = d.userDict[k]; });   // 辞書は不足分だけ追加
+      mergeImages(d.images);
       const list = d.exams || (d.sections ? [d] : (d.userDict ? [] : null));
       if (!list) throw new Error('形式が違います');
       if (!list.length) { AUTO_CACHE.clear(); saveStore(); refresh(); toast('ルビ辞書を読み込みました'); return; }
@@ -907,6 +992,86 @@ function importBackup(file) {
     } catch (e) { alert('読み込めませんでした。このアプリで保存したバックアップ(.json)を選んでください。\n' + e.message); }
   };
   fr.readAsText(file);
+}
+
+/* ---- 画像(図) ----
+   画像の中身は exam の中に入れず store.images に1か所でまとめ、大問の図には id だけを持たせる。
+   なぜ：履歴(snapshot)は exam を丸ごと写すので、中に画像があると同じ画像が最大40回保存されて容量があふれるため。
+   id は画像の中身から作るので、同じ画像を何度入れても・複製しても1枚分で済む。
+   どこからも使われなくなった画像は gcImages() で消す。履歴から使われている画像は残す(復元したときに図が消えないように)。 */
+let imgsDirty = false;      // IndexedDB の控えに書き直す必要があるか
+const getImg = id => (store && store.images[id]) || BUILTIN_IMAGES[id] || null;
+const IMG_URL = new Map();  // 画面に出すときは data URL ではなく blob URL を使う(打つたびに数MBの文字列を組み直さないため)
+function imgURL(id) {
+  if (IMG_URL.has(id)) return IMG_URL.get(id);
+  const im = getImg(id); if (!im) return '';
+  const [head, body] = im.data.split(',');
+  const mime = head.slice(5).split(';')[0];
+  let bytes;
+  if (/;base64$/.test(head)) { const bin = atob(body); bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); }
+  else bytes = new TextEncoder().encode(decodeURIComponent(body));
+  const u = URL.createObjectURL(new Blob([bytes], { type: mime })); IMG_URL.set(id, u); return u;
+}
+const imgId = d => 'i' + hash32(d).toString(36) + hash32(d.slice(d.length >> 1) + d.length).toString(36) + d.length.toString(36);
+function addImage(rec) { const id = imgId(rec.data); if (!store.images[id]) { store.images[id] = rec; imgsDirty = true; } return id; }
+function usedImageIds(exams, snaps) {
+  const u = new Set(), add = ex => (ex.sections || []).forEach(s => (s.figures || []).forEach(f => u.add(f.img)));
+  exams.forEach(add); (snaps || []).forEach(sn => add(sn.exam));
+  return u;
+}
+function pickImages(ids) { const o = {}; ids.forEach(id => { if (store.images[id]) o[id] = store.images[id]; }); return o; }
+function mergeImages(images, into = store) {
+  Object.keys(images || {}).forEach(k => { if (!into.images[k]) { into.images[k] = images[k]; if (into === store) imgsDirty = true; } });
+}
+function gcImages() {
+  const u = usedImageIds(store.exams, store.snaps);
+  Object.keys(store.images).forEach(k => { if (!u.has(k)) { delete store.images[k]; imgsDirty = true; } });
+}
+/* 起動時：IndexedDB の控えから画像を戻す(localStorage には画像を入れていないため) */
+async function restoreImages() {
+  try {
+    const im = await idbGet('images'); if (!im) return;
+    const n = Object.keys(store.images).length; mergeImages(im); imgsDirty = false;
+    if (Object.keys(store.images).length > n) renderAll();
+  } catch (e) { console.warn(e); }
+}
+/* 画像ファイルを読む。長い辺が IMG_MAX を超えたら縮める。図・線画は PNG のまま、写真(JPEG)は JPEG。
+   PNG が大きすぎる(写真をスクリーンショットしたもの等)ときは、JPEG の方が半分以下なら JPEG にする */
+async function loadImageFile(file) {
+  const src = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsDataURL(file); });
+  const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('画像として開けませんでした（形式に対応していない可能性があります）')); i.src = src; });
+  let w = im.naturalWidth, h = im.naturalHeight;
+  if (!w || !h) throw new Error('画像の大きさが分かりませんでした');
+  const jpeg = file.type === 'image/jpeg', svg = file.type === 'image/svg+xml';
+  if (Math.max(w, h) <= IMG_MAX && (jpeg || file.type === 'image/png')) return { data: src, w, h, type: file.type };
+  const k = svg ? IMG_MAX / Math.max(w, h) : Math.min(1, IMG_MAX / Math.max(w, h));   // SVG は大きく描いてから PNG にする(にじまないように)
+  w = Math.round(w * k); h = Math.round(h * k);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h);
+  let type = jpeg ? 'image/jpeg' : 'image/png', data = cv.toDataURL(type, 0.88);
+  if (!jpeg && data.length > 1.2e6) { const j = cv.toDataURL('image/jpeg', 0.9); if (j.length < data.length / 2) { data = j; type = 'image/jpeg'; } }
+  return { data, w, h, type };
+}
+async function addFigures(s, files) {
+  const list = [...files].filter(f => /^image\//.test(f.type));
+  if (!list.length) { toast('画像のファイル（PNG・JPEG など）を選んでください'); return; }
+  let n = 0;
+  for (const f of list) {
+    try { const id = addImage(await loadImageFile(f)); s.figures.push({ id: uid(), img: id, caption: '', width: 50, gray: false }); n++; }
+    catch (e) { alert(`「${f.name || '貼り付けた画像'}」を読み込めませんでした。\n${e.message}\n\nPNG や JPEG の画像を選んでください。`); }
+  }
+  if (!n) return;
+  touch(); renderEditor(); toast(`図を${n}枚入れました。見出しを入れると、本文で〔図:見出し〕と書いて番号を指せます`);
+}
+/* 本文などのカーソルの位置に〔図:見出し〕を入れる */
+function insertFigRef(f) {
+  const cap = plain(f.caption || '').trim();
+  if (!cap) { toast('先に、この図の見出しを入れてください'); return; }
+  const t = lastField;
+  if (!t || !document.contains(t) || t.classList.contains('figcap')) { toast('番号を入れたい入力欄（本文など）をクリックしてから押してください'); return; }
+  const a = t.selectionStart ?? t.value.length, b = t.selectionEnd ?? a;
+  t.value = t.value.slice(0, a) + `〔図:${cap}〕` + t.value.slice(b);
+  t.dispatchEvent(new Event('input')); t.focus(); const p = a + cap.length + 4; t.setSelectionRange(p, p);
 }
 
 /* ---- データファイル(.json)への自動保存 ----
@@ -941,12 +1106,12 @@ const idbSet = (k, v) => idb('readwrite', s => s.put(v, k));
 function fileData() {
   store.exams.forEach(e => e.schema = SCHEMA);
   return { app: 'testmaker', kind: 'data', schema: SCHEMA, savedAt: new Date().toISOString(), current: store.current,
-    exams: store.exams, userDict: store.userDict, snaps: store.snaps,
+    exams: store.exams, userDict: store.userDict, snaps: store.snaps, images: store.images,
     lastBackupAt: store.lastBackupAt || 0, lastChangeAt: store.lastChangeAt || 0, lastSnapAt: store.lastSnapAt || 0 };
 }
 function storeFromData(d) {
   if (!d || d.app !== 'testmaker' || !Array.isArray(d.exams)) throw new Error('テスト問題メーカーのデータではありません');
-  const s = { v: 1, current: d.current, exams: d.exams.map(migrate), snaps: d.snaps || [], userDict: d.userDict || {},
+  const s = { v: 1, current: d.current, exams: d.exams.map(migrate), snaps: d.snaps || [], userDict: d.userDict || {}, images: d.images || {},
     lastBackupAt: d.lastBackupAt || 0, lastChangeAt: d.lastChangeAt || 0, lastSnapAt: d.lastSnapAt || 0 };
   if (!s.exams.length) s.exams.push(sampleExam());
   if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id;
@@ -985,6 +1150,7 @@ function mergeLocal(s) {
     + '\n\nデータファイルに加えますか？\n［OK］加える（同じテストは「このブラウザの分」として別に加えます）\n［キャンセル］加えない（このブラウザの中の分は、データファイルの内容に置き換わります）')) return 0;
   extra.forEach(e => { const c = clone(e); if (byId.has(c.id)) { c.id = uid(); c.name += '（このブラウザの分）'; } s.exams.push(c); });
   Object.keys(store.userDict || {}).forEach(k => { if (!(k in s.userDict)) s.userDict[k] = store.userDict[k]; });
+  mergeImages(store.images, s);
   s.lastChangeAt = Date.now();
   return extra.length;
 }
@@ -996,7 +1162,7 @@ async function dfOpenHandle(hd) {
   DF.handle = hd; DF.lastMod = f.lastModified; DF.state = 'ok'; DF.err = ''; DF.savedAt = 0;
   try { await idbSet('dataFile', hd); } catch (e) { console.warn(e); }
   const merged = s ? mergeLocal(s) : 0;
-  if (s) { s.fileSavedAt = Date.now(); store = s; }
+  if (s) { s.fileSavedAt = Date.now(); store = s; imgsDirty = true; }
   if (merged || !s) saveStore(); else { DF.dirty = false; lsSave(); }
   renderAll(); renderFileBar(); updateStatus();
 }
@@ -1166,12 +1332,20 @@ function sectionCard(s, i, ex) {
     btn(s.collapsed ? '開く' : '閉じる', () => { s.collapsed = !s.collapsed; touch(); renderEditor(); }, '内容を折りたたむ'),
     btn('▲', () => { if (move(ex.sections, i, -1)) { touch(); renderEditor(); } }, '上へ'),
     btn('▼', () => { if (move(ex.sections, i, 1)) { touch(); renderEditor(); } }, '下へ'),
-    btn('複製', () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => it.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); }, 'この大問をコピー'),
+    btn('複製', () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => it.id = uid()); (c.figures || []).forEach(f => f.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); }, 'この大問をコピー'),
     btn('削除', () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); touch(); renderEditor(); } }, '', 'danger'));
   card.append(head);
+  // 画像は、この大問のどこで貼り付け(Ctrl+V)・ドラッグしても図として入る(Scratch の画面のスクリーンショットなど)
+  card.addEventListener('paste', e => {
+    const fs = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => /^image\//.test(f.type));
+    if (fs.length) { e.preventDefault(); addFigures(s, fs); }
+  });
+  card.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); card.classList.add('drop'); } });
+  card.addEventListener('dragleave', e => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop'); });
+  card.addEventListener('drop', e => { card.classList.remove('drop'); if (e.dataTransfer.files.length) { e.preventDefault(); addFigures(s, e.dataTransfer.files); } });
   if (s.collapsed) return card;
 
-  const lead = field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 }));
+  const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })), figPanel(s));
 
   if (s.type === 'blank') {
     const ta = bindText(s, 'text', { tag: 'textarea', rows: 9 });
@@ -1258,6 +1432,37 @@ function sectionCard(s, i, ex) {
   return card;
 }
 
+/* 大問の図の欄：追加・見出し・大きさ・白黒・並べ替え・削除 */
+function figPanel(s) {
+  const fileIn = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+  fileIn.addEventListener('change', () => { const fs = [...fileIn.files]; fileIn.value = ''; if (fs.length) addFigures(s, fs); });
+  const box = h('div', { class: 'sub figbox' },
+    h('div', { class: 'qhead' }, h('b', {}, '図（画像）'), h('span', { class: 'spacer' }),
+      s.figures.length ? h('label', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint', style: 'margin:0' }, '置き場所'), bindSelect(s, 'figPos', Object.entries(FIG_POS))) : null,
+      btn('＋ 図を追加', () => fileIn.click(), '画像のファイルを選ぶ', 'primary'), fileIn));
+  if (!s.figures.length) box.append(h('div', { class: 'hint' }, '回路図・まさ目と板目の図・Scratch の画面などを入れられます。ファイルを選ぶほか、この大問の中で貼り付け（Ctrl+V）や、画像をドラッグしても入ります。'));
+  s.figures.forEach((f, fi) => {
+    const cap = bindText(f, 'caption', { ph: '見出し（例：回路図）', cls: 'grow figcap' });
+    const gray = h('input', { type: 'checkbox' }); gray.checked = !!f.gray;
+    const thumb = h('img', { src: imgURL(f.img), alt: '', class: 'thumb' + (f.gray ? ' gray' : '') });
+    gray.addEventListener('change', () => { f.gray = gray.checked; thumb.classList.toggle('gray', f.gray); touch(); });
+    const noDown = e => e.preventDefault();   // 押しても本文のカーソルが外れないように
+    box.append(h('div', { class: 'figed' },
+      getImg(f.img) ? thumb : h('div', { class: 'thumb miss' }, '画像なし'),
+      h('div', { class: 'figed-b' },
+        h('div', { class: 'row nowrap' }, h('span', { class: 'qno', 'data-fig': f.id }, ''), cap),
+        h('div', { class: 'row', style: 'margin-top:4px' },
+          h('label', { class: 'row', style: 'gap:4px' }, '大きさ', bindText(f, 'width', { type: 'number', min: 10, max: 100, step: 5, cls: 'w5' }), '%'),
+          h('label', { class: 'row', style: 'gap:4px' }, gray, '白黒にする'),
+          h('button', { type: 'button', class: 'btn small', onmousedown: noDown, onclick: () => insertFigRef(f), title: 'クリックしておいた入力欄のカーソルの位置に〔図:見出し〕を入れます' }, '本文に番号を入れる'),
+          btn('▲', () => { if (move(s.figures, fi, -1)) { touch(); renderEditor(); } }, '前へ'),
+          btn('▼', () => { if (move(s.figures, fi, 1)) { touch(); renderEditor(); } }, '後ろへ'),
+          btn('削除', () => { if (!confirm('この図を削除しますか？\n（直前の状態は「履歴」に残ります）')) return; snapshot(true, '図の削除前'); s.figures.splice(fi, 1); touch(); renderEditor(); }, '', 'danger')))));
+  });
+  if (s.figures.length) box.append(h('div', { class: 'hint', style: 'margin-top:6px' }, '番号はテスト全体の通し番号で自動で付きます。本文で図を指すときは ', h('code', {}, '〔図:見出し〕'), ' と書くと「図３」のような番号に置き換わります（大問を並べ替えても合います）。大きさは用紙の幅に対する割合です。'));
+  return box;
+}
+
 let lastField = null;
 document.addEventListener('focusin', e => { if (e.target.matches && e.target.matches('#editor input[type=text], #editor textarea')) lastField = e.target; });
 function addRuby() {
@@ -1306,6 +1511,7 @@ function refresh() {
     : `<div class="warns ok">警告はありません</div>`;
   // 編集欄の自動表示（番号・空欄一覧）
   document.querySelectorAll('[data-qid]').forEach(el => { const no = C.itemNo[el.dataset.qid]; el.textContent = no == null ? '' : `（${no}）`; });
+  document.querySelectorAll('[data-fig]').forEach(el => { const no = C.figNo[el.dataset.fig]; el.textContent = no == null ? '' : '図' + zen(no); });
   document.querySelectorAll('[data-map]').forEach(el => {
     const sec = C.sections.find(x => x.id === el.dataset.map); if (!sec || !sec.blankMap) return;
     const items = sec.blankMap.map(b => `（${zen(b.n)}）→<b>${esc(b.label)}</b> ${esc(plain(b.term))}`);
@@ -1367,7 +1573,13 @@ function setupButtons() {
     fr.readAsText(f); };
   $('#bHist').onclick = openHistory;
   $('#bHelp').onclick = () => { $('#helpBody').innerHTML = helpHTML(); $('#dlgHelp').showModal(); };
-  $('#bWord').onclick = () => withEngine(() => { try { download(buildDocx(compile(cur())), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました'); } catch (e) { alert('Word出力に失敗しました: ' + e.message); } });
+  $('#bWord').onclick = () => withEngine(() => {
+    try {
+      const C2 = compile(cur()), nf = C2.sections.reduce((a, x) => a + x.figs.length, 0);
+      if (nf && !confirm(`今は、Word出力には図（${nf}枚）が入りません（印刷／PDF には入ります）。\n本文の中の「図３」などの番号は出ます。\nWordファイルを書き出しますか？`)) return;   // TODO ②で Word にも図を入れたら消す
+      download(buildDocx(C2), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました');
+    } catch (e) { alert('Word出力に失敗しました: ' + e.message); }
+  });
   $('#bPrint').onclick = () => withEngine(() => { refresh(); doPrint(); });
   $('#bCsv').onclick = () => { download(new Blob([buildCSV(compile(cur()))], { type: 'text/csv' }), `${safeName(cur().name)}_正答.csv`); };
   $('#bKeyJson').onclick = () => { const ex = cur(); download(new Blob([JSON.stringify(buildKeyJSON(compile(ex), ex), null, 1)], { type: 'application/json' }), `${safeName(ex.name)}_採点用.json`); toast('採点アプリ用の正答ファイルを書き出しました'); };
@@ -1405,6 +1617,12 @@ function helpHTML() {
 <ul><li>本文の空欄にしたい語句を選んで「選択した語句を空欄にする」。<code>{{語句}}</code> と書いても同じです。</li>
 <li>語群は「正解の語句＋ダミー」から自動で作られます。ダミーは別の欄に1行ずつ。</li>
 <li>同じ空欄を文中でもう一度出すときは「同じ空欄をもう一度使う」（<code>{{@語句}}</code>）。</li></ul>
+<h4>図（画像）</h4>
+<ul><li>大問の「＋ 図を追加」で画像のファイルを選びます。<b>この大問の中で貼り付け（Ctrl+V）</b>や、画像をドラッグしても入ります（Scratch の画面のスクリーンショットなど）。</li>
+<li>置き場所は大問ごとに「本文の上／本文の下／本文の右」から選びます。大きさは用紙の幅に対する割合（%）です。</li>
+<li>番号（図１・図２…）はテスト全体の通し番号で自動で付きます。本文で図を指すときは <code>〔図:見出し〕</code> と書くと、その図の番号に置き換わります。「本文に番号を入れる」を押すと、クリックしておいた入力欄に入ります。</li>
+<li>白黒で印刷するので、色の付いた図は「白黒にする」で見え方を確かめておくと安心です。</li>
+<li>大きな画像は、読み込むときに自動で小さくします。<b>今は Word 出力には図が入りません</b>（印刷／PDF には入ります）。</li></ul>
 <h4>ルビ・フォント</h4>
 <ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
 <li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
@@ -1530,7 +1748,7 @@ store = loadStore();
 setupButtons();
 renderAll();
 saveStore();
-dfInit();
+restoreImages().then(dfInit);
 </script>
 </body>
 </html>
