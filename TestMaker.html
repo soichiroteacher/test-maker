@@ -17,6 +17,10 @@
    このHTMLファイルをChromeかEdgeで開くだけ。インターネット不要・インストール不要。
    外部ライブラリ・外部通信は一切使っていない（10年後も動くことを優先）。
 
+ ■ はじめての方へ・見本で試す(上の「使い方 ▾」)
+   画面の案内 TOUR(はじめて開いたときは自動で出る)。画面の部品を変えたら TOUR の sel と説明も直す。
+   見本で試す startTrial/endTrial: 見本だけの仮のデータに切り替え、その間は何も保存しない(本当のデータは trial.store に預ける)。
+
  ■ データの置き場所
    1) データファイル: 先生が選んだ「テスト問題メーカー_データ.json」(ふつうはこのHTMLと同じフォルダ)。
       変更のたびに自動で上書き保存する(Chrome/Edge のファイルへの直接保存の機能)。中身はバックアップと同じ形＋履歴。
@@ -104,6 +108,17 @@ select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);bord
 /* データファイルの状態の帯(上部)。注意が要るときだけ目立たせる */
 .filebar{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 14px;font-size:14px;background:#fff;border-bottom:1px solid var(--line);color:var(--sub)}
 .filebar[hidden]{display:none}
+/* 見本で試している間の帯(青)。保存しないことが分かるように、ずっと出しておく */
+.trialbar{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:7px 14px;font-size:14px;font-weight:700;background:#e8f0fe;color:var(--accent-d);border-bottom:2px solid var(--accent)}
+.trialbar[hidden]{display:none}
+/* 画面の案内(はじめての方へ)：画面の一部を光らせて順に説明する。採点アプリの画面ガイドと同じ形 */
+.tour-hole{position:fixed;z-index:50;border-radius:10px;box-shadow:0 0 0 9999px rgba(20,25,35,.55);outline:3px solid #FFD54A;transition:all .2s;pointer-events:none}
+.tour-card{position:fixed;z-index:51;width:min(400px,calc(100vw - 32px));background:var(--panel);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:16px 18px}
+.tour-card h3{margin:0 0 6px;font-size:17px}
+.tour-card p{margin:0 0 12px;font-size:14.5px;line-height:1.7}
+.tour-card .tour-foot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tour-card .tour-foot .tour-n{margin-right:auto;color:var(--sub);font-size:13px}
+.tour-block{position:fixed;inset:0;z-index:49}
 .filebar.warn{background:var(--warn-bg);color:var(--warn);font-weight:700}
 .filebar.bad{background:#fdecea;color:var(--danger);font-weight:700}
 .filebar .btn{font-weight:400;color:var(--ink);background:#fff}
@@ -274,7 +289,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* ---- print: show only the sheet ---- */
 @media print{
   html,body{height:auto;background:#fff}
-  .app,#toast,dialog{display:none!important}
+  .app,#toast,dialog,.tour-hole,.tour-card,.tour-block{display:none!important}
   #printRoot{display:block!important}
   #printRoot .sheet{zoom:1!important;width:auto;padding:0;margin:0;box-shadow:none}
 }
@@ -324,11 +339,16 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
           <button type="button" id="bHist">履歴から前の状態に戻す</button>
           <hr><button type="button" id="bFile">データファイル（保存先）を変える</button>
         </div></div>
-      <button type="button" class="btn" id="bHelp">使い方</button>
+      <div class="menu"><button type="button" class="btn" data-menu id="bHelpMenu">使い方 ▾</button>
+        <div class="menu-p right">
+          <button type="button" id="bTour">はじめての方へ（画面の案内）</button>
+          <button type="button" id="bTrial">見本で試す（保存しません）</button>
+          <hr><button type="button" id="bHelp">くわしい説明（使い方・引き継ぎ）</button>
+        </div></div>
     </div>
     <div class="grp sep">
       <span class="seg" id="pvSeg" title="右のプレビュー（問題用紙の見本）の大きさ"><span class="seg-l">プレビュー</span><button type="button" data-pv="big">大</button><button type="button" data-pv="small">小</button><button type="button" data-pv="none">なし</button></span>
-      <div class="menu"><button type="button" class="btn primary" data-menu>出力 ▾</button>
+      <div class="menu"><button type="button" class="btn primary" data-menu id="bOut">出力 ▾</button>
         <div class="menu-p right">
           <button type="button" id="bPrint">印刷／PDF</button>
           <button type="button" id="bWord">Word で出力</button>
@@ -338,6 +358,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     </div>
   </header>
   <div class="filebar" id="fileBar"></div>
+  <div class="trialbar" id="trialBar" hidden><span>見本のテストで試しています。ここで直した内容は保存しません（本当のデータはそのままです）。</span><button type="button" class="btn small primary" id="bTrialEnd">見本を終わって元に戻る</button></div>
   <div class="main">
     <section class="col"><div class="editor" id="editor"></div></section>
     <section class="col pvcol">
@@ -1441,6 +1462,7 @@ function loadStore() {
 /* localStorage(予備)に保存し、データファイルを使っていればそちらにも書く */
 function saveStore() {
   clearTimeout(_saveT); _saveT = null;
+  if (trial) { updateStatus(); return; }   // 見本で試している間は、どこにも書かない(本当のデータを守るため)
   gcImages();
   if (imgsDirty) { imgsDirty = false; idbSet('images', store.images).catch(e => { console.warn(e); imgsDirty = true; }); }
   lsSave();
@@ -1661,6 +1683,7 @@ function mergeLocal(s) {
 
 /* 許可済みのファイルを開いて、その中身を今のデータにする(空のファイルなら今の内容を書く) */
 async function dfOpenHandle(hd) {
+  if (trial) endTrial(true);   // 本当のデータを開くので、見本は終わる
   const f = await hd.getFile(), text = await f.text();
   const s = text.trim() ? storeFromData(JSON.parse(text)) : null;
   DF.handle = hd; DF.lastMod = f.lastModified; DF.state = 'ok'; DF.err = ''; DF.savedAt = 0;
@@ -1727,7 +1750,7 @@ function renderFileBar() {
   const bar = $('#fileBar'), b = (label, fn, cls = '') => h('button', { type: 'button', class: 'btn small ' + cls, onclick: fn }, label);
   const nm = DF.handle ? `「${DF.handle.name}」` : '';
   const set = (cls, ...kids) => { bar.hidden = false; bar.className = 'filebar ' + cls; bar.replaceChildren(...kids); };
-  if (DF.state === 'ok') { bar.className = 'filebar'; bar.hidden = true; return; }   // うまく保存できているときは帯を出さない(上の「データファイルに保存」で分かる)
+  if (DF.state === 'ok' || trial) { bar.className = 'filebar'; bar.hidden = true; return; }   // 見本で試している間も出さない(押すと本当のデータを開くため)   // うまく保存できているときは帯を出さない(上の「データファイルに保存」で分かる)
   else if (DF.state === 'need') set('warn', `⚠ データファイル${nm}をまだ開いていません。今の画面は、このブラウザの中の控えです。`, b('データファイルを開く', dfReopen, 'primary'));
   else if (DF.state === 'none') set('warn', '⚠ このブラウザの中にだけ保存しています（別のブラウザ・パソコンからは見えません）。', b('保存先のファイルを決める', () => openFileDialog(), 'primary'));
   else if (DF.state === 'error') set('bad', `⚠ データファイル${nm}に保存できませんでした（${DF.err}）。このブラウザの中には控えがあります。`, b('もう一度保存', dfRetry, 'primary'), b('保存先を変える', () => openFileDialog(true)));
@@ -1737,6 +1760,7 @@ function renderFileBar() {
 
 /* はじめて・開き直したときに出す画面。change=true は「保存先を変える」から */
 function openFileDialog(change) {
+  if (trial) endTrial(true);
   const dlg = $('#dlgFile'), body = $('#fileBody'), close = () => dlg.close();
   const choice = (label, sub, fn, cls = '') => h('button', { type: 'button', class: 'btn ' + cls, onclick: fn }, label, h('small', {}, sub));
   if (DF.state === 'need' && !change) {
@@ -2197,6 +2221,11 @@ function fitPreview() {
   sheet.style.zoom = Math.min(1, avail / full);
 }
 function updateStatus() {
+  if (trial) {
+    $('#saveStat').textContent = '見本で試しています（保存しません）';
+    $('#bkBadge').className = 'menu-note'; $('#bkBadge').textContent = '見本で試している間は、データの操作はできません';
+    $('#bData').classList.remove('dirty'); return;
+  }
   $('#saveStat').textContent = DF.state === 'ok'
     ? (DF.writing || DF.dirty ? '保存中…' : (DF.savedAt ? `データファイルに保存 ${fmtTime(DF.savedAt)}` : 'データファイルを開きました'))
     : (saveFailed ? '⚠ 自動保存できません。必ずバックアップ保存を' : (store.savedAt ? `このブラウザに保存 ${fmtTime(store.savedAt)}` : ''));
@@ -2244,6 +2273,136 @@ function setPreviewSize(v, quiet) {
   try { localStorage.setItem('testmaker:preview', v); } catch (e) { }
   if (!quiet) { fitPreview(); refresh(); }
 }
+/* ---- 見本で試す ----
+   見本のテスト(sampleExam)だけの仮のデータに切り替える。その間 saveStore は何も書かない
+   (データファイル・このブラウザの控え・画像の控えのどれにも)。終わると、切り替える前のデータに戻す。
+   本当のデータには触らないので、見本をどう直しても・消しても大丈夫。ルビの辞書だけは写しを使う(自動ルビを同じに見せるため) */
+let trial = null;   // 見本で試している間、本当のデータ(store)をここに預ける
+function startTrial() {
+  if (trial) return;
+  if (_saveT) saveStore();   // 書きかけの本当のデータを先に保存しておく
+  const ex = sampleExam();
+  trial = { store };
+  store = { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: clone(store.userDict || {}), images: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
+  AUTO_CACHE.clear(); $('#trialBar').hidden = false;
+  renderAll(); renderFileBar(); updateStatus();
+  toast('見本のテストを開きました。自由に直してみてください（保存はしません）');
+}
+function endTrial(quiet) {
+  if (!trial) return;
+  store = trial.store; trial = null;
+  AUTO_CACHE.clear(); $('#trialBar').hidden = true;
+  renderAll(); renderFileBar(); updateStatus();
+  if (!quiet) toast('見本を終わり、元のデータに戻しました');
+}
+// データの操作(バックアップ・読み込み・履歴・保存先)は、見本で試している間はさせない(見本がバックアップに入ったり、本当のデータと混ざったりしないように)
+const notInTrial = fn => () => { if (trial) { alert('今は見本で試しています。\nこの操作は、上の青い帯の「見本を終わって元に戻る」を押してからにしてください。'); return; } fn(); };
+
+/* ---- 画面の案内(はじめての方へ) ----
+   sel：光らせる部品、up：その部品を含む枠まで広げるとき。部品が見えないとき(プレビュー「なし」など)は、その説明を飛ばす。
+   画面の部品(ボタンの名前・場所)を変えたら、ここの sel と説明も直すこと。採点アプリの画面ガイド(TOUR)と同じしくみ */
+const TOUR_KEY = 'testmaker:tour-seen';
+const TOUR = [
+  { title: 'ようこそ', text: 'テストの問題用紙を作るアプリです。左で問題を入力すると、右に問題用紙がその場で出ます。番号・記号・正答は自動で付きます。<br>これから画面を順番に案内します（約2分）。' },
+  { sel: '#examSel', up: '.grp', title: 'テストの切り替え', text: '作っているテストをここで選びます。「テスト ▾」から、新しいテストを作る・複製する（次の学期はここから）・名前を変える・削除するができます。' },
+  { sel: '.edtool', title: 'ルビ', text: '入力欄で漢字を選んでから「選択した語句にルビを付ける」を押すと、読みを付けられます。「ルビを表示」を外すと、ルビのない用紙になります。' },
+  { sel: '#editor details.card', title: '基本設定', text: '開くと、タイトル・注意書き・名前の欄・字体・文字の大きさ・行間・余白・ページ数・観点などを決められます。' },
+  { sel: '#editor .sc-head', title: '大問', text: '大問ごとに、見出し・本文・問題を入力します。語群選択では、本文の語句を選んで「選択した語句を空欄にする」と空欄になります。▲▼で順番を入れ替え、「その他 ▾」で複製・削除ができます。' },
+  { sel: '#editor .addbar', title: '大問を追加', text: '語群選択・選択問題・正誤問題・記述問題の4つから選んで足します。図（画像）やプログラムの欄は、大問の中から入れられます。' },
+  { sel: '#preview', title: '問題用紙の見本', text: '入力するたびに、ここに問題用紙が出ます。「正答一覧」に切り替えると、正答を確かめられます。正解を決めていないなど、<b>確認すること</b>があるときもここに出ます。' },
+  { sel: '#pvSeg', title: 'プレビューの大きさ', text: '見本が大きくて入力しづらいときは「小」か「なし」にします。「なし」のときに確認することがあると、上に「⚠ 確認すること」が出ます。' },
+  { sel: '#bOut', title: '出力', text: 'できたら「出力 ▾」から選びます。<b>印刷／PDF</b>、<b>Word で出力</b>（細かく手直ししたいとき）、<b>採点用JSON</b>（マークシート採点アプリに正答・配点を渡す）、正答CSV があります。' },
+  { sel: '#bData', title: '保存とバックアップ', text: '作ったテストは、データファイルに<b>自動で</b>保存します（左の「データファイルに保存　時刻」で分かります）。「データ ▾」から、バックアップの保存・読み込みと、履歴から前の状態に戻すことができます。前のバックアップのあとに変更があると、黄色になります。' },
+  { sel: '#bHelpMenu', title: '案内はここまでです', text: () => trial
+      ? 'このまま見本のテストを自由に直したり、「出力」で印刷の見本を出したりしてみてください。保存はしません。<br>終わったら、上の青い帯の<b>「見本を終わって元に戻る」</b>を押します。<br>案内をもう一度見るとき・くわしい説明は、この「使い方 ▾」から。'
+      : '案内をもう一度見るとき・くわしい説明は、この「使い方 ▾」から。<br>保存せずに触ってみたいときは、「使い方 ▾」→<b>「見本で試す」</b>がおすすめです。' },
+];
+let tourIndex = -1, tourEls = null;
+function tourTarget(t) {
+  if (!t.sel) return null;
+  let el = document.querySelector(t.sel);
+  if (el && t.up) el = el.closest(t.up) || el;
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width && r.height ? el : null;   // 見えない部品は対象にしない
+}
+function startTour(from = 0) {
+  try { localStorage.setItem(TOUR_KEY, '1'); } catch (e) { /* 覚えられなくても続ける */ }
+  document.querySelectorAll('.menu.open').forEach(x => x.classList.remove('open'));
+  if (!tourEls) {
+    tourEls = { block: h('div', { class: 'tour-block' }), hole: h('div', { class: 'tour-hole' }), card: h('div', { class: 'tour-card', role: 'dialog', 'aria-live': 'polite', tabindex: '-1' }) };
+    tourEls.block.onclick = e => e.stopPropagation();
+  }
+  Object.values(tourEls).forEach(el => document.body.append(el));
+  document.addEventListener('keydown', tourKey);
+  window.addEventListener('resize', placeTour);
+  document.addEventListener('scroll', placeTour, true);   // 左の入力欄などが動いたら、光らせる枠もついていく
+  showTourStep(from, 1);
+}
+function endTour() {
+  if (!tourEls) return;
+  Object.values(tourEls).forEach(el => el.remove());
+  document.removeEventListener('keydown', tourKey);
+  window.removeEventListener('resize', placeTour);
+  document.removeEventListener('scroll', placeTour, true);
+  tourIndex = -1;
+}
+function tourKey(e) {
+  if (e.key === 'Escape') endTour();
+  else if (e.key === 'ArrowRight') showTourStep(tourIndex + 1, 1);
+  else if (e.key === 'ArrowLeft') showTourStep(tourIndex - 1, -1);
+}
+function showTourStep(i, dir) {
+  if (i < 0) i = 0;
+  if (i >= TOUR.length) { endTour(); return; }
+  const t = TOUR[i];
+  if (t.sel && !tourTarget(t)) { if (i + dir < 0) { showTourStep(i + 1, 1); return; } showTourStep(i + dir, dir); return; }   // 対象が見えない説明は飛ばす
+  tourIndex = i;
+  const val = v => typeof v === 'function' ? v() : v, first = i === 0, last = i === TOUR.length - 1;
+  tourEls.card.innerHTML = `<h3>${val(t.title)}</h3><p>${val(t.text)}</p><div class="tour-foot"><span class="tour-n">${i + 1} / ${TOUR.length}</span>`
+    + (first ? `${trial ? '' : '<button type="button" class="btn small" data-t="trial">見本で試しながら見る</button>'}<button type="button" class="btn small primary" data-t="next">始める</button>`
+             : `<button type="button" class="btn small" data-t="prev">戻る</button><button type="button" class="btn small primary" data-t="next">${last ? '閉じる' : '次へ'}</button>`)
+    + `</div><button type="button" class="btn small" data-t="close" style="position:absolute;top:10px;right:10px;padding:2px 8px" aria-label="案内を閉じる">×</button>`;
+  tourEls.card.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
+    const a = b.dataset.t;
+    if (a === 'next') showTourStep(i + 1, 1);
+    else if (a === 'prev') showTourStep(i - 1, -1);
+    else if (a === 'close') endTour();
+    else if (a === 'trial') { startTrial(); showTourStep(1, 1); }
+  });
+  const el = tourTarget(t);
+  if (el) el.scrollIntoView({ block: 'nearest' });
+  placeTour(); setTimeout(placeTour, 400);   // なめらかに動くところがあるので、動き終わってからもう一度合わせる
+  tourEls.card.focus({ preventScroll: true });
+}
+/* 光らせる枠と説明の位置。説明は部品の下、入らなければ上、どちらも無理なら画面の下 */
+function placeTour() {
+  if (tourIndex < 0) return;
+  const el = tourTarget(TOUR[tourIndex]), hole = tourEls.hole, card = tourEls.card;
+  const cw = card.offsetWidth, ch = card.offsetHeight, vw = innerWidth, vh = innerHeight, m = 16;
+  if (!el) {
+    hole.style.cssText = 'top:50%;left:50%;width:0;height:0';
+    card.style.left = Math.max(m, (vw - cw) / 2) + 'px'; card.style.top = Math.max(m, (vh - ch) / 2) + 'px';
+    return;
+  }
+  const r = el.getBoundingClientRect(), pad = 6;
+  const top = Math.max(4, r.top - pad), bottom = Math.min(vh - 4, r.bottom + pad);
+  hole.style.cssText = `top:${top}px;left:${Math.max(4, r.left - pad)}px;width:${Math.min(vw - 8, r.width + pad * 2)}px;height:${Math.max(0, bottom - top)}px`;
+  let y = bottom + 12;
+  if (y + ch > vh - m) y = top - 12 - ch;
+  if (y < m) y = vh - ch - m;
+  card.style.top = y + 'px';
+  card.style.left = Math.min(vw - cw - m, Math.max(m, r.left)) + 'px';
+}
+/* はじめて開いたとき(案内を見たことがなく、まだ何も作っていないとき)は案内を出す。保存先を決める画面が出ていれば、閉じてから */
+function firstTour() {
+  let seen = true; try { seen = !!localStorage.getItem(TOUR_KEY); } catch (e) { }
+  if (seen || store.lastChangeAt) return;
+  const dlg = $('#dlgFile');
+  if (dlg.open) dlg.addEventListener('close', () => setTimeout(() => { if (tourIndex < 0) startTour(0); }, 300), { once: true });
+  else setTimeout(() => startTour(0), 500);
+}
+
 function setupButtons() {
   $('#examSel').addEventListener('change', e => { store.current = e.target.value; saveStore(); renderAll(); });
   $('#bNew').onclick = () => {
@@ -2263,15 +2422,18 @@ function setupButtons() {
     if (!confirm(`「${cur().name}」を削除しますか？\n（直前の状態は「履歴」に残ります）`)) return;
     snapshot(true, '削除前'); store.exams = store.exams.filter(e => e.id !== store.current); store.current = store.exams[0].id; store.lastChangeAt = Date.now(); saveStore(); renderAll();
   };
-  $('#bBackup').onclick = exportBackup;
-  $('#bFile').onclick = () => fsSupported() ? openFileDialog(true) : alert('このブラウザは、ファイルへの保存に対応していません。Chrome か Edge で開いてください。');
+  $('#bBackup').onclick = notInTrial(exportBackup);
+  $('#bFile').onclick = notInTrial(() => fsSupported() ? openFileDialog(true) : alert('このブラウザは、ファイルへの保存に対応していません。Chrome か Edge で開いてください。'));
+  $('#bTour').onclick = () => startTour(0);
+  $('#bTrial').onclick = startTrial;
+  $('#bTrialEnd').onclick = () => endTrial();
   setupMenus(); setupPreviewSize();
-  $('#bLoad').onclick = () => $('#fileIn').click();
+  $('#bLoad').onclick = notInTrial(() => $('#fileIn').click());
   $('#fileIn').onchange = e => { if (e.target.files[0]) importBackup(e.target.files[0]); e.target.value = ''; };
   $('#dictIn').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; const fr = new FileReader();
     fr.onload = () => { try { const d = JSON.parse(fr.result); const w = d.words || d.userDict; if (!w) throw new Error('辞書ではありません'); let n = 0; Object.keys(w).forEach(k => { if (!(k in store.userDict)) { store.userDict[k] = w[k]; n++; } }); dictChanged(); toast(`${n}語を追加しました`); if ($('#dlgRuby').open) openRubyDialog(); } catch (er) { alert('読み込めませんでした: ' + er.message); } };
     fr.readAsText(f); };
-  $('#bHist').onclick = openHistory;
+  $('#bHist').onclick = notInTrial(openHistory);
   $('#bHelp').onclick = () => { $('#helpBody').innerHTML = helpHTML(); $('#dlgHelp').showModal(); };
   $('#bWord').onclick = () => withEngine(async () => {
     try {
@@ -2307,11 +2469,15 @@ function openHistory() {
 
 function helpHTML() {
   return `<h2>使い方・引き継ぎメモ</h2>
+<div class="row" style="gap:8px;margin:4px 0 8px"><button type="button" class="btn primary" onclick="this.closest('dialog').close();startTour(0)">画面の案内を見る（はじめての方へ）</button><button type="button" class="btn" onclick="this.closest('dialog').close();startTrial()">見本で試す（保存しません）</button></div>
+<h4>はじめての方へ</h4>
+<ul><li>「使い方 ▾」→「はじめての方へ（画面の案内）」で、画面の部品を順に光らせて説明します。はじめて開いたときは自動で出ます。</li>
+<li>「使い方 ▾」→「見本で試す」で、見本のテストを自由に直してみられます。<b>見本で試している間は何も保存しません</b>（本当のデータはそのまま）。終わったら、上の青い帯の「見本を終わって元に戻る」を押します。見本の間は、バックアップなど「データ」の操作はできません。</li></ul>
 <h4>基本の流れ</h4>
 <ul><li>左で大問を作る（語群選択／選択問題／正誤／記述）。右にその場で用紙が出ます。</li>
 <li>番号（１）（２）…・記号（ア）（イ）…・正答は<b>すべて自動</b>です。問題の順番を入れ替えても番号は付け直されます。</li>
 <li>右上の<b>「出力」</b>から：「印刷／PDF」→ そのまま印刷・PDF保存／「Word で出力」→ 細かい手直しをしたいとき／「採点用JSON」→ 採点アプリへ／「正答CSV」→ 正答の表。</li>
-<li>テストの新規・複製・名前・削除は「テスト」、バックアップ・読み込み・履歴・保存先は「データ」にまとめてあります（未バックアップの変更があると「データ」が黄色になります）。</li>
+<li>テストの新規・複製・名前・削除は「テスト」、バックアップ・読み込み・履歴・保存先は「データ」、画面の案内・見本・この説明は「使い方」にまとめてあります（未バックアップの変更があると「データ」が黄色になります）。</li>
 <li>右のプレビュー（問題用紙の見本）は、上の「プレビュー　大・小・なし」で大きさを変えられます。編集に集中したいときは「小」か「なし」に。「なし」のときに確かめることがあると、上に「⚠ 確認すること」が出ます。</li>
 <li>画面の「確認してください」に出る警告（正解の未設定・選択肢数オーバーなど）を消してから出力します。</li></ul>
 <h4>語群選択の書き方</h4>
@@ -2464,7 +2630,7 @@ store = loadStore();
 setupButtons();
 renderAll();
 saveStore();
-restoreImages().then(dfInit);
+restoreImages().then(dfInit).then(firstTour, firstTour);
 </script>
 </body>
 </html>
