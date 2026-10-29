@@ -3,6 +3,8 @@ ruby-engine.js
 
 # バックアップ・出力したファイルを公開リポジトリに上げないため
 *.json
+# ただし、架空のサンプル(採点用JSONの見本)は上げる
+!docs/sample-answerkey.json
 *.csv
 *.docx
 *.pdf

@@ -1,0 +1,101 @@
+{
+ "app": "testmaker-answerkey",
+ "schema": 1,
+ "exportedAt": "2026-10-28T03:16:25.263Z",
+ "exam": {
+  "id": "mvrjlwjytpdus",
+  "name": "サンプル　R8 1学年 技術 1学期（正答は要確認）",
+  "title": "令和８年度　１学年技術・家庭科（技術分野）　１学期定期テスト",
+  "date": "R8.6.17(水)実施"
+ },
+ "labels": [
+  "ア",
+  "イ",
+  "ウ",
+  "エ",
+  "オ",
+  "カ",
+  "キ",
+  "ク",
+  "ケ",
+  "コ"
+ ],
+ "total": 60,
+ "items": [
+  {
+   "no": 1,
+   "section": 1,
+   "label": "キ",
+   "index": 7,
+   "text": "IoT",
+   "points": 2
+  },
+  {
+   "no": 2,
+   "section": 1,
+   "label": "エ",
+   "index": 4,
+   "text": "ハードウェア",
+   "points": 2
+  },
+  {
+   "no": 3,
+   "section": 1,
+   "label": "ク",
+   "index": 8,
+   "text": "ソフトウェア",
+   "points": 2
+  }
+ ],
+ "written": [],
+ "sections": [
+  {
+   "no": 1,
+   "title": "身の回りの情報の技術・コンピュータの仕組み",
+   "type": "blank",
+   "from": 1,
+   "to": 7,
+   "points": 14
+  },
+  {
+   "no": 2,
+   "title": "情報のデジタル化",
+   "type": "blank",
+   "from": 8,
+   "to": 13,
+   "points": 12
+  },
+  {
+   "no": 3,
+   "title": "情報通信ネットワーク",
+   "type": "blank",
+   "from": 14,
+   "to": 20,
+   "points": 14
+  },
+  {
+   "no": 4,
+   "title": "情報セキュリティの仕組み・情報モラル",
+   "type": "blank",
+   "from": 21,
+   "to": 23,
+   "points": 6
+  },
+  {
+   "no": 5,
+   "title": "タイピング",
+   "type": "blank",
+   "from": 24,
+   "to": 26,
+   "points": 6
+  },
+  {
+   "no": 6,
+   "title": "中タブレットルール",
+   "type": "tf",
+   "from": 27,
+   "to": 30,
+   "points": 8
+  }
+ ]
+}

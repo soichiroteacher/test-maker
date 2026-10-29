@@ -20,10 +20,14 @@
 
 ## 次にやること
 
-1. **このフォルダにまだ無いファイルを置く**(ユーザーが自分で入れる予定)
+1. **(2026-10-29 済)残りのファイルを置いた**(ユーザーから受け取った testmaker-complete.zip から)
    - `ruby-engine.js`(自動ルビの辞書、約24MB。生成物)… GitHub には上げない(`.gitignore` で除外している)。appcopy にはコピーされる。
-   - `tools/build-ruby-engine.js`(`ruby-engine.js` を作り直すスクリプト)… GitHub に上げてよい。
-   - `README.txt`(前の配布用の説明)… 内容を README.md に合わせて、不要なら削除する。
+     別のPCで GitHub から取ったときは、appcopy か `tools/build-ruby-engine.js` で作り直して手に入れる。
+   - `tools/build-ruby-engine.js`(`ruby-engine.js` を作り直すスクリプト。手順はファイルの冒頭)… GitHub に上げた。Download ZIP には入れない(`.gitattributes`)。
+   - `README.txt`(前の配布用の説明)… 残っている。内容を README.md に合わせて、不要なら削除する。
+   - `docs/HISTORY.md`(Claude.ai で開発していたときの経緯・決定事項・未解決事項)… **最初に読むとよい**。冒頭に、今の状態との違いを書き足してある。
+   - `docs/sample-answerkey.json`(採点用JSONの見本。架空の内容)… `.gitignore` に例外を足して GitHub に上げた。
+   - zip の `START_HERE.md` は、`docs/INTEGRATION.md` と同じ内容なので置いていない。zip の `TestMaker.html` は、ここにあるものと同じだった。
 2. **前の場所の自動保存のデータを引き継ぐ**
    - 自動保存(localStorage `testmaker:v1`)は、HTML を開いた場所ごとに別になる。新しい場所で開くと空に見える。
    - 前の場所で「バックアップ保存」→ 新しい場所で「読み込み」で移す。
