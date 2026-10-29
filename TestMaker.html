@@ -44,7 +44,7 @@
  ■ 図(画像)
    大問ごとに図を入れられる(ファイル選択・貼り付け・ドラッグ)。置き場所は本文の上/下/右。
    画像の中身は store.images に1か所でまとめ、大問には id だけを持たせる(履歴で画像が増えないように)。→「画像(図)」の節
-   Word出力にはまだ図が入らない(印刷/PDFには入る)。
+   Word出力にも入る(buildDocx の前に docxImages() で PNG/JPEG にそろえる。SVG と「白黒にする」は canvas で作り直す)。
 =====================================================================
 -->
 <style>
@@ -784,34 +784,82 @@ function P(runs, o = {}) {        // paragraph
   return `<w:p><w:pPr>${p}</w:pPr>${Array.isArray(runs) ? runs.join('') : runs}</w:p>`;
 }
 const SPACER = (h = 100) => `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="${h}" w:lineRule="exact"/></w:pPr></w:p>`;
-/* table: rows=[{cells:[{w,span,xml,shd}],h,rule}] */
+/* table: rows=[{cells:[{w,span,xml,shd,va(縦の位置)}],h,rule,split(ページをまたいでよい)}] */
 function TBL(rows, grid, o = {}) {
   const bd = o.box ? '<w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/>'
     : o.grid ? '<w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>' : '';
   const total = grid.reduce((a, b) => a + b, 0);
-  let x = `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/>${o.ind ? `<w:tblInd w:w="${o.ind}" w:type="dxa"/>` : ''}` +
+  let x = `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/>${o.jc ? `<w:jc w:val="${o.jc}"/>` : ''}${o.ind ? `<w:tblInd w:w="${o.ind}" w:type="dxa"/>` : ''}` +
     `<w:tblBorders>${bd || '<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>'}<w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders>` +
     `<w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="${o.padV ?? 30}" w:type="dxa"/><w:left w:w="${o.padH ?? 110}" w:type="dxa"/><w:bottom w:w="${o.padV ?? 30}" w:type="dxa"/><w:right w:w="${o.padH ?? 110}" w:type="dxa"/></w:tblCellMar></w:tblPr>` +
     `<w:tblGrid>${grid.map(g => `<w:gridCol w:w="${g}"/>`).join('')}</w:tblGrid>`;
   rows.forEach(r => {
-    x += `<w:tr><w:trPr><w:cantSplit/>${r.h ? `<w:trHeight w:val="${r.h}" w:hRule="${r.rule || 'atLeast'}"/>` : ''}</w:trPr>`;
+    x += `<w:tr><w:trPr>${r.split ? '' : '<w:cantSplit/>'}${r.h ? `<w:trHeight w:val="${r.h}" w:hRule="${r.rule || 'atLeast'}"/>` : ''}</w:trPr>`;
     r.cells.forEach(c => {
       x += `<w:tc><w:tcPr><w:tcW w:w="${c.w}" w:type="dxa"/>${c.span > 1 ? `<w:gridSpan w:val="${c.span}"/>` : ''}` +
         (c.bottom ? '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders>' : '') +
-        (c.shd ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.shd}"/>` : '') + `</w:tcPr>${c.xml}</w:tc>`;
+        (c.shd ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.shd}"/>` : '') + (c.va ? `<w:vAlign w:val="${c.va}"/>` : '') + `</w:tcPr>${c.xml}</w:tc>`;
     });
     x += '</w:tr>';
   });
   return x + '</w:tbl>';
 }
+/* 行内の図(wp:inline)。cx・cy は EMU */
+const drawingXml = (rid, cx, cy, id) => `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="図${id}"/>` +
+  '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
+  '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+  `<pic:nvPicPr><pic:cNvPr id="${id}" name="image${id}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+  `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+const docxImgKey = f => f.img + (f.gray ? '|白黒' : '');
+/* Word に入れる画像を PNG/JPEG のバイト列でそろえる。canvas を使うので非同期(buildDocx の前に呼ぶ)。
+   SVG(見本の図)は Word で開けないことがあるので PNG に、「白黒にする」の図は白黒にした画像にする(画面のような CSS の白黒は Word にないため) */
+async function docxImages(C) {
+  const out = new Map();
+  for (const sec of C.sections) for (const f of sec.figs) {
+    const key = docxImgKey(f); if (!f.ok || out.has(key)) continue;
+    const im = getImg(f.img);
+    try {
+      if (!f.gray && (im.type === 'image/png' || im.type === 'image/jpeg')) out.set(key, { bytes: dataBytes(im.data), ext: im.type === 'image/png' ? 'png' : 'jpeg', w: im.w, h: im.h });
+      else out.set(key, await rasterize(im, f.gray));
+    } catch (e) { console.warn(e); }   // 作れなかった図は「画像がありません」の枠になる
+  }
+  return out;
+}
+async function rasterize(im, gray) {
+  const el = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('画像を開けませんでした')); i.src = im.data; });
+  const svg = im.type === 'image/svg+xml', k = svg ? IMG_MAX / Math.max(im.w, im.h) : 1;
+  const w = Math.round((el.naturalWidth || im.w) * k), h = Math.round((el.naturalHeight || im.h) * k);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(el, 0, 0, w, h);
+  if (gray) {
+    const d = g.getImageData(0, 0, w, h), p = d.data;
+    for (let i = 0; i < p.length; i += 4) { const y = Math.round(p[i] * 0.299 + p[i + 1] * 0.587 + p[i + 2] * 0.114); p[i] = p[i + 1] = p[i + 2] = y; }
+    g.putImageData(d, 0, 0);
+  }
+  const jpeg = im.type === 'image/jpeg';
+  const blob = await new Promise(res => cv.toBlob(res, jpeg ? 'image/jpeg' : 'image/png', 0.9));
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), ext: jpeg ? 'jpeg' : 'png', w, h };
+}
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 
-function buildDocx(C) {
+function buildDocx(C, imgs = new Map()) {
   const m = C.meta, FW = 10106, IND = 800; RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
   BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
   const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
   const lab = t => R(t, { b: true, bdr: true });
   const body = [];
+  // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
+  const media = [], mediaOf = new Map(); let drawN = 0;
+  const figXml = (f, maxW) => {
+    const cap = P(RR('図' + zen(f.no) + (f.caption ? '　' + f.caption : ''), { sz: sz - 1 }), { jc: 'center', line: 300, after: 60 });
+    const im = imgs.get(docxImgKey(f));
+    if (!im) return P(R(`（図${zen(f.no)}の画像がありません）`), { jc: 'center', box: true, keepNext: true }) + cap;
+    if (!mediaOf.has(im)) { const n = media.length + 1; media.push({ name: `image${n}.${im.ext}`, rid: 'rIdImg' + n, im }); mediaOf.set(im, media[media.length - 1]); }
+    const md = mediaOf.get(im);
+    let w = maxW, h = Math.round(w * im.h / im.w);
+    if (h > 11000) { w = Math.round(w * 11000 / h); h = 11000; }        // 縦長の図が1ページに入るように
+    return P(drawingXml(md.rid, w * 635, h * 635, ++drawN), { jc: 'center', keepNext: true }) + cap;   // 1 twip = 635 EMU
+  };
 
   // ---- ヘッダ部 ----
   if (m.date.trim()) body.push(P(R(m.date, { sz: 18 }), { jc: 'right' }));
@@ -834,66 +882,89 @@ function buildDocx(C) {
     if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: 330, after: 40, keepNext: true }));
     sec.notes.forEach(x => body.push(P(RR('※　' + x, { sz: sz - 1 }), { left: unit * 1.2, hanging: unit * 1.2, line: 320, after: 20, keepNext: true })));
 
-    if (sec.type === 'blank') {
-      sec.paras.forEach((toks, i) => {
-        const runs = toks.map(t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
-        body.push(P(runs, { first: unit, line: 400, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
-      });
-      const b = sec.bank, cols = b.cols, cw = Math.floor(FW / cols);
-      const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? FW - cw * (cols - 1) : cw);
-      const rows = [{ cells: [{ w: FW, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
-      const lines = chunk(b.items, cols);
-      lines.forEach((ln, ri) => {
-        const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
-        for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
-        rows.push({ cells });
-      });
-      body.push(TBL(rows, grid, { box: true, padV: 25 }), SPACER(120));
-    }
-    else if (sec.type === 'choice') {
-      sec.items.forEach(it => {
-        body.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
-        const cols = it.cols, avail = FW - IND, cw = Math.floor(avail / cols);
-        const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
-        const rows = chunk(it.choices, cols).map(ln => {
-          const cells = ln.map((c, ci) => ({ w: grid[ci], xml: P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
-          for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
-          return { cells };
+    // 種類ごとの中身。main = 本文(段落・設問)、after = 語群。fw = 使える幅(twip)。図を「本文の右」に置くときは狭くなる
+    const renderBody = fw => {
+      const main = [], after = [];
+      if (sec.type === 'blank') {
+        sec.paras.forEach((toks, i) => {
+          const runs = toks.map(t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
+          main.push(P(runs, { first: unit, line: 400, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
         });
-        body.push(TBL(rows, grid, { ind: IND - 110, padV: 10 }), SPACER(60));
-      });
+        const b = sec.bank, cols = b.cols, cw = Math.floor(fw / cols);
+        const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? fw - cw * (cols - 1) : cw);
+        const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
+        const lines = chunk(b.items, cols);
+        lines.forEach((ln, ri) => {
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+          for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
+          rows.push({ cells });
+        });
+        after.push(TBL(rows, grid, { box: true, padV: 25 }), SPACER(120));
+      }
+      else if (sec.type === 'choice') {
+        sec.items.forEach(it => {
+          main.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
+          const cols = it.cols, avail = fw - IND, cw = Math.floor(avail / cols);
+          const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
+          const rows = chunk(it.choices, cols).map(ln => {
+            const cells = ln.map((c, ci) => ({ w: grid[ci], xml: P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
+            for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
+            return { cells };
+          });
+          main.push(TBL(rows, grid, { ind: IND - 110, padV: 10 }), SPACER(60));
+        });
+      }
+      else if (sec.type === 'tf') {
+        sec.items.forEach(it => main.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 360, before: 40, after: 40, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` })));
+      }
+      else if (sec.type === 'written') {
+        sec.items.forEach(it => {
+          const ptx = m.showPoints && it.points ? [R(`　（${it.points}点）`, { sz: sz - 3 })] : [];
+          main.push(P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
+          const w = fw - IND;
+          main.push(TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w, xml: P('') }] }], [w], { ind: IND - 110, grid: true }), SPACER(80));
+        });
+      }
+      return { main, after };
+    };
+    const F = sec.figs;
+    if (!F.length) { const r = renderBody(FW); body.push(...r.main, ...r.after); }
+    else if (sec.figPos === 'right') {   // 右：枠線なしの2列の表(左に本文・右に図)。浮かせる図はWordとLibreOfficeでずれやすいので使わない
+      const sw = Math.round(FW * Math.min(60, Math.max(20, ...F.map(f => f.width))) / 100), mw = FW - sw;
+      const r = renderBody(mw - 220), side = F.map(f => figXml(f, sw - 280)).join('');
+      body.push(TBL([{ split: true, cells: [{ w: mw, xml: r.main.join('') + P('') }, { w: sw, xml: side }] }], [mw, sw]), ...renderBody(FW).after);   // 語群は用紙の幅いっぱい
     }
-    else if (sec.type === 'tf') {
-      sec.items.forEach(it => body.push(P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 360, before: 40, after: 40, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` })));
-    }
-    else if (sec.type === 'written') {
-      sec.items.forEach(it => {
-        const ptx = m.showPoints && it.points ? [R(`　（${it.points}点）`, { sz: sz - 3 })] : [];
-        body.push(P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }));
-        const w = FW - IND;
-        body.push(TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w, xml: P('') }] }], [w], { ind: IND - 110, grid: true }), SPACER(80));
-      });
+    else {   // 上・下：図を横に並べる(入りきらなければ次の行へ)。行は途中で改ページしない
+      const r = renderBody(FW), rows = [];
+      let line = [], used = 0;
+      F.forEach(f => { const w = Math.round(FW * f.width / 100); if (line.length && used + w > FW) { rows.push(line); line = []; used = 0; } line.push({ f, w }); used += w; });
+      if (line.length) rows.push(line);
+      const figs = rows.map(rw => TBL([{ cells: rw.map(c => ({ w: c.w, va: 'bottom', xml: figXml(c.f, c.w - 280) })) }], rw.map(c => c.w), { jc: 'center' })).join('') + SPACER(80);
+      if (sec.figPos === 'above') body.push(figs, ...r.main, ...r.after);
+      else body.push(...r.main, figs, ...r.after);
     }
   });
   body.push(P(''));   // 本文末は必ず段落で終える
 
   const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const NSD = NS + ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
   const sect = '<w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="900" w:bottom="1000" w:left="900" w:header="567" w:footer="450" w:gutter="0"/></w:sectPr>';
-  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NS}><w:body>${body.join('')}${sect}</w:body></w:document>`;
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NSD}><w:body>${body.join('')}${sect}</w:body></w:document>`;
   const ftr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="${FW}"/></w:tabs><w:spacing w:before="0" w:after="0"/></w:pPr>` +
     R(m.footer.trim(), { sz: 16 }) + TAB +
     '<w:fldSimple w:instr=" PAGE "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>' + R(' / ', { sz: 18 }) +
     '<w:fldSimple w:instr=" NUMPAGES "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>';
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}" w:cs="${font}" w:hint="eastAsia"/><w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="en-US" w:eastAsia="ja-JP" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`;
   const settings = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:updateFields w:val="true"/><w:defaultTabStop w:val="840"/><w:characterSpacingControl w:val="compressPunctuation"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
-  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>';
+  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>';
   const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
-  const drels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>';
+  const drels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' +
+    media.map(md => `<Relationship Id="${md.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${md.name}"/>`).join('') + '</Relationships>';
   const enc = new TextEncoder();
   return zipStore([
     ['[Content_Types].xml', ct], ['_rels/.rels', rels], ['word/document.xml', docXml], ['word/_rels/document.xml.rels', drels],
     ['word/styles.xml', styles], ['word/settings.xml', settings], ['word/footer1.xml', ftr]
-  ].map(([name, s]) => ({ name, data: enc.encode(s) })), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  ].map(([name, s]) => ({ name, data: enc.encode(s) })).concat(media.map(md => ({ name: 'word/media/' + md.name, data: md.im.bytes }))), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
 }
 
 /* ---- 最小のZIP書き出し（無圧縮）---- */
@@ -1005,12 +1076,13 @@ const IMG_URL = new Map();  // 画面に出すときは data URL ではなく bl
 function imgURL(id) {
   if (IMG_URL.has(id)) return IMG_URL.get(id);
   const im = getImg(id); if (!im) return '';
-  const [head, body] = im.data.split(',');
-  const mime = head.slice(5).split(';')[0];
-  let bytes;
-  if (/;base64$/.test(head)) { const bin = atob(body); bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); }
-  else bytes = new TextEncoder().encode(decodeURIComponent(body));
-  const u = URL.createObjectURL(new Blob([bytes], { type: mime })); IMG_URL.set(id, u); return u;
+  const u = URL.createObjectURL(new Blob([dataBytes(im.data)], { type: im.data.slice(5).split(/[;,]/)[0] })); IMG_URL.set(id, u); return u;
+}
+function dataBytes(d) {   // data URL → バイト列
+  const [head, body] = d.split(',');
+  if (!/;base64$/.test(head)) return new TextEncoder().encode(decodeURIComponent(body));
+  const bin = atob(body), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
 }
 const imgId = d => 'i' + hash32(d).toString(36) + hash32(d.slice(d.length >> 1) + d.length).toString(36) + d.length.toString(36);
 function addImage(rec) { const id = imgId(rec.data); if (!store.images[id]) { store.images[id] = rec; imgsDirty = true; } return id; }
@@ -1573,11 +1645,10 @@ function setupButtons() {
     fr.readAsText(f); };
   $('#bHist').onclick = openHistory;
   $('#bHelp').onclick = () => { $('#helpBody').innerHTML = helpHTML(); $('#dlgHelp').showModal(); };
-  $('#bWord').onclick = () => withEngine(() => {
+  $('#bWord').onclick = () => withEngine(async () => {
     try {
-      const C2 = compile(cur()), nf = C2.sections.reduce((a, x) => a + x.figs.length, 0);
-      if (nf && !confirm(`今は、Word出力には図（${nf}枚）が入りません（印刷／PDF には入ります）。\n本文の中の「図３」などの番号は出ます。\nWordファイルを書き出しますか？`)) return;   // TODO ②で Word にも図を入れたら消す
-      download(buildDocx(C2), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました');
+      const C2 = compile(cur());
+      download(buildDocx(C2, await docxImages(C2)), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました');
     } catch (e) { alert('Word出力に失敗しました: ' + e.message); }
   });
   $('#bPrint').onclick = () => withEngine(() => { refresh(); doPrint(); });
@@ -1622,7 +1693,7 @@ function helpHTML() {
 <li>置き場所は大問ごとに「本文の上／本文の下／本文の右」から選びます。大きさは用紙の幅に対する割合（%）です。</li>
 <li>番号（図１・図２…）はテスト全体の通し番号で自動で付きます。本文で図を指すときは <code>〔図:見出し〕</code> と書くと、その図の番号に置き換わります。「本文に番号を入れる」を押すと、クリックしておいた入力欄に入ります。</li>
 <li>白黒で印刷するので、色の付いた図は「白黒にする」で見え方を確かめておくと安心です。</li>
-<li>大きな画像は、読み込むときに自動で小さくします。<b>今は Word 出力には図が入りません</b>（印刷／PDF には入ります）。</li></ul>
+<li>大きな画像は、読み込むときに自動で小さくします。図は、印刷／PDF にも Word 出力にも入ります。</li></ul>
 <h4>ルビ・フォント</h4>
 <ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
 <li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
