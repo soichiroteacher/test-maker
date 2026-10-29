@@ -132,7 +132,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .figed .thumb.miss{display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--danger);border-style:dashed}
 .figed-b{flex:1;min-width:0}
 .figed input.grow{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
-.sub input.w5,.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
+.card input.w5,.sub input.w5,.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 .addbar{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 40px}
 
 /* ---- preview ---- */
@@ -1765,6 +1765,10 @@ function settingsCard(ex) {
       h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
     field('改ページ', bindSelect(m, 'pageMode', Object.entries(PAGE_MODES))),
+    h('div', { class: 'row' },
+      h('label', { class: 'row', style: 'gap:4px' }, bindText(m, 'fitPages', { type: 'number', min: 1, max: 20, cls: 'w5' }), 'ページ'),
+      h('button', { type: 'button', class: 'btn small primary', onclick: fitToPages }, 'このページ数に収める'),
+      h('span', { class: 'hint', style: 'margin:0' }, '文字の大きさ・行間・余白を自動で決めます（そのあと手で直せます）')),
     field('ページ下の文言（著作権表示など）', bindText(m, 'footer'))
   );
   return d;
@@ -2049,6 +2053,67 @@ function refresh() {
   $('#countStat').textContent = `マークシート${C.answers.length}問 ・ 記述${C.written.length}問 ・ ${C.total}点`;
   updateStatus();
 }
+/* ---- 〇ページに収める ----
+   印刷のページ数を画面の上で見積もる：用紙を印刷と同じ幅で見えない所に描き、ページの切れ目の決まりをまねて数える
+   (表・設問・語群・図などは途中で切らない、見出しは次と離さない、「大問の途中で変えない」なら大問ごと送る)。
+   Word はページの分け方を Word が決めるので、1ページずれることがある */
+function countPages(ex, over) {
+  const m = { ...ex.meta, ...over }, mg = mgOf(m);
+  const keepR = { RUBY, AUTO };
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;left:-10000px;top:0;visibility:hidden';
+  box.innerHTML = `<div class="sheet${m.showRuby ? ' ruby-on' : ''}" style="${sheetStyle(m)};padding:0 ${mg.x}mm;box-shadow:none">${renderPaperHTML(compile({ ...ex, meta: m }))}</div>`;
+  RUBY = keepR.RUBY; AUTO = keepR.AUTO;
+  document.body.append(box);
+  const sheet = box.firstChild, px = 96 / 25.4, pageH = (297 - mg.t - mg.b) * px;
+  // 数える部品：切ってよい(split)＝本文の段落・本文の右に図のある塊、見出し＝次と離さない(keepNext)
+  const atoms = [];
+  [...sheet.children].forEach(el => {
+    if (el.tagName !== 'SECTION') { atoms.push({ el }); return; }
+    const sn = atoms.filter(a => a.first).length;   // 何番目の大問か(0 = 大問1)
+    [...el.children].forEach((c, i) => atoms.push({ el: c, sec: el, sn, first: i === 0, keepNext: c.tagName === 'H2', split: c.matches('.para, .figrow') }));
+  });
+  const end = sheet.getBoundingClientRect().bottom;
+  atoms.forEach(a => { const r = a.el.getBoundingClientRect(); a.top = r.top; a.bot = r.bottom; });
+  // h = 次の部品までの高さ(下の余白を含む)、hv = 見える高さ。ページの最後の部品の下の余白は、印刷では次のページに持ち越されない
+  atoms.forEach((a, i) => { a.h = (i + 1 < atoms.length ? atoms[i + 1].top : end) - a.top; a.hv = Math.min(a.h, a.bot - a.top); });
+  atoms.forEach(a => { if (a.first) a.secH = a.sec.getBoundingClientRect().bottom - a.top; });   // 大問の見える高さ(下の余白を除く)
+  box.remove();
+  let pages = 1, y = 0;
+  const next = () => { pages++; y = 0; };
+  atoms.forEach((a, i) => {
+    if (a.first && y > 0) {
+      if (m.pageMode === 'section') { if (a.sn > 0) next(); }   // 大問1の前では改ページしない(印刷と同じ)
+      else if (m.pageMode === 'keep' && a.secH <= pageH && y + a.secH > pageH) next();
+    }
+    const nx = atoms[i + 1];
+    if (a.keepNext && nx && y > 0 && y + a.h + Math.min(nx.h, pageH * 0.25) > pageH) next();
+    if (!a.split && y > 0 && y + a.hv > pageH) next();
+    const vis = y + a.hv;
+    if (vis > pageH) { const k = Math.ceil(vis / pageH) - 1; pages += k; y -= k * pageH; }   // 1ページより長い部品・段落
+    y += a.h;
+  });
+  return pages;
+}
+/* 読みやすい順に試して、指定のページ数に入る最初の設定にする(字の大きさ → 行間 → 余白の順に詰める) */
+const FIT_ORDER = [[12, 'loose', 'normal'], [12, 'normal', 'normal'], [11, 'loose', 'normal'], [11, 'normal', 'normal'], [11, 'tight', 'normal'], [11, 'normal', 'narrow'], [11, 'tight', 'narrow'],
+  [10.5, 'normal', 'normal'], [10.5, 'tight', 'normal'], [10.5, 'tight', 'narrow'], [10, 'normal', 'normal'], [10, 'tight', 'normal'], [10, 'tight', 'narrow']];
+function fitToPages() {
+  const ex = cur(), N = Math.max(1, Math.round(num(ex.meta.fitPages, 2)));
+  let hit = null, last = 0;
+  for (const [size, lineSpacing, margin] of FIT_ORDER) {
+    last = countPages(ex, { size, lineSpacing, margin });
+    if (last <= N) { hit = { size, lineSpacing, margin, pages: last }; break; }
+  }
+  if (!hit) {
+    const tip = ex.meta.pageMode !== 'flow' ? '\n（改ページを「続けて詰める」にすると、大問の途中でもページが変わるので、もう少し詰まります）' : '';
+    alert(`いちばん小さくしても ${N} ページに収まりません（約 ${last} ページになります）。\n問題を減らすか、ページ数を増やしてください。${tip}`); return;
+  }
+  Object.assign(ex.meta, { size: hit.size, lineSpacing: hit.lineSpacing, margin: hit.margin });
+  AUTO_CACHE.clear(); touch(); renderEditor();
+  alert(`${N} ページに収まるように、次の設定にしました（印刷で約 ${hit.pages} ページ）。\n\n文字の大きさ：${hit.size}pt\n行間：${LINE_SPACING[hit.lineSpacing][0]}\n余白：${MARGINS[hit.margin][0]}\n\nWord では、ページの分け方を Word が決めるので、1ページずれることがあります。\nこのあと、手で直してもかまいません。`);
+}
+
 /* 用紙の字・行間・余白の指定(画面・印刷・ページ数を数えるときに使う) */
 const sheetStyle = m => `--fs:${m.size}pt;--ls:${lsOf(m)};--mx:${mgOf(m).x}mm;--mt:${mgOf(m).t}mm;--mb:${mgOf(m).b}mm;font-family:${fontCss(m.font).replace(/"/g, "'")}`;
 function fitPreview() {
