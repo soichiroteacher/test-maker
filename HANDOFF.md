@@ -116,6 +116,12 @@
      - 共通:`usedImageIds`(画像の掃除・バックアップ)に、設問の図と選択肢の画像も入れる。複製したときは図の id を付け直す。
 
 6. **【ユーザーの要望・直し方を決めた】問題用紙の体裁**(2026-10-29。下はユーザーの言葉のまま。直し方は同じ日にユーザーと決めた)
+   - **1〜5 は 2026-10-29 にできた**(6 はユーザーの返事待ち)。
+     - 1 番の欄:画面は `.p-name`、Word は右そろえタブの位置(`p1`〜`p3`。タブの位置は「下線＋その後の字」の右端)。
+     - 2 行間・余白:`LINE_SPACING`・`MARGINS`・`lsOf`・`mgOf`。画面は `.sheet` の `--ls`(行間の倍率)・`--mx` など(`sheetStyle`)、Word は `P()` の行間に `LSK` をかけ、余白は `pgMar` と `FW`。CSS の line-height の数字は Word の `line ÷ 200` にそろえた。ルビ付きの行は `--rf`(2.0)より狭くしない(Word もルビの分だけ自動で行を高くするため)。実物の Word で行の間隔を測って確かめた(ルビあり:Word 22.4〜25.4pt・画面 22〜25.3pt。ルビなし:Word 18/21/24pt・画面 19.4/22/25.3pt)。
+     - 3 改ページ:`pageMode: 'keep'`(新しいテストの既定。前からあるテストは前の設定のまま)。画面・印刷は `.sec.keep{break-inside:avoid}`、Word は `keepAll`(大問の中のすべての段落に keepNext・keepLines を付け、最後だけ外す)。表どうしがくっつくと Word が1つの表にして枠線が消えるので、間に `SPACER` を入れる。
+     - 4 〇ページ:`countPages`(用紙を見えない所に印刷と同じ幅で描き、ページの切れ目の決まりをまねて数える)・`fitToPages`(`FIT_ORDER` の順に試す)。Chrome の実際の印刷と9通りで比べ、8通りは同じ、1通りは見積もりが1ページ多かった(少なく見積もることはなかった)。
+     - 5 観点:`KANTEN_MAX`=3、`kantenAbbr`(頭の1字)、`pointsText`・`itemKantenText`・`writtenPtText`、`kantenSel`。採点アプリ v1.17 で `parseAnswerKey`・`applyAnswerKey` を直した。
    - **決めたこと**(作る順はこの順):
      1. 番の欄:年・組・番を同じ幅(約15mm)、名前は残りの幅いっぱい。画面と Word で同じ形(Word は今、番の欄がとても狭い)。
      2. 行間:**画面と Word を同じ行間**にして「狭め・ふつう・広め」を選べるようにする。ふつう = 今の Word くらい(今の画面より詰まる)。
@@ -151,7 +157,8 @@
 
 ## 採点アプリとの約束(変えるときは両方を直す)
 
-- 採点用JSON(`buildKeyJSON`)の形は `app: "testmaker-answerkey"`、`schema: 1`。形を変えたら `schema` を上げ、採点アプリ側(`marksheet-grader/index.html` の `parseAnswerKey`)も直す。採点アプリは知らない schema を読まずにお知らせを出す。
+- 採点用JSON(`buildKeyJSON`)の形は `app: "testmaker-answerkey"`、`schema` は 1 か 2。形を変えたら `schema` を上げ、採点アプリ側(`marksheet-grader/index.html` の `parseAnswerKey`)も直す。採点アプリは知らない schema を読まずにお知らせを出す。
+- schema 2(2026-10-29〜。採点アプリ v1.17 で読める)= schema 1 に観点を足したもの:`kanten`(観点の名前3つ)、`items[].kanten`・`written[].kanten`(番号。-1 はなし)。**観点を1つも使っていないテストは schema 1 のまま書き出す**(前の版の採点アプリでも読めるように)。
 - マークシートの問題番号は全大問を通した連番。記述は連番に入れず「記1, 記2…」。正答の `index` は1始まり(ア=1)。
 - `labels` の数は「マークシートの最大選択肢数」。採点アプリの解答用紙はア〜コの**10個まで**なので、11以上にすると採点アプリが読み込まない。
 - `exam.id` が問題と採点結果を結びつけるキー。同じ id を採点アプリで読み込み直すと、読み取り結果を残して採点し直す。テストを「複製」すると別の id になる。

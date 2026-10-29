@@ -335,13 +335,14 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 7;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 8;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
                                         // 5(2026-10-29): コードの欄の種類(codeKind: text|blocks)とブロックの大きさ(blockScale)を追加
                                         // 6(2026-10-29): 選択肢を文字列から {text, img} に(図の選択肢)。設問に choiceCols・choiceH
                                         // 7(2026-10-29): 体裁に行間(lineSpacing)・余白(margin)・改ページ「大問の途中で変えない」(pageMode: keep)・ページ数(fitPages)
+                                        // 8(2026-10-29): 観点。meta に kantenNames・showKanten、大問に kanten(-1=なし)、設問に kanten(null=大問と同じ)
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -364,6 +365,10 @@ const FONTS = [
 const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文の右' };
 /* 体裁：行間と余白。画面・印刷と Word で同じ値を使う(見た目をそろえるため)。
    行間は倍率。Word の段落の行間(P の line)と、画面の line-height の両方にかける */
+/* 観点：採点アプリと同じく3つまで(知識・技能/思考・判断・表現/主体的に学習に取り組む態度)。番号(0〜2)で持ち、-1 はなし */
+const KANTEN_MAX = 3;
+const kantenOk = (m, k) => Number.isInteger(k) && k >= 0 && k < KANTEN_MAX && !!String(m.kantenNames[k] || '').trim();
+const kantenAbbr = (m, k) => kantenOk(m, k) ? String(m.kantenNames[k]).trim().slice(0, 1) : '';   // 「知」「思」「主」(採点アプリの解答用紙と同じ)
 const LINE_SPACING = { tight: ['狭め', 0.88], normal: ['ふつう', 1], loose: ['広め', 1.15] };
 const MARGINS = { normal: ['ふつう', { t: 14, b: 16, x: 14 }], narrow: ['狭め', { t: 10, b: 13, x: 10 }] };   // mm(上・下・左右)
 const PAGE_MODES = { keep: '詰めるが、大問の途中ではページを変えない（入らない大問は次のページへ）', flow: '続けて詰める（大問の途中でもページが変わる）', section: '大問ごとに改ページ' };
@@ -465,13 +470,14 @@ function newMeta() {
     showName: true, font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
     showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'keep', keepBank: true,
     lineSpacing: 'normal', margin: 'normal', fitPages: 2,
+    kantenNames: ['知識・技能', '思考・判断・表現', '主体的に学習に取り組む態度'], showKanten: true,
     footer: '本教材のすべての権利は作成者が保有しています。本教材の内容は無断で複製、配布、転載することを禁じます。'
   };
 }
 const newChoice = (text = '') => ({ text, img: null });
 // 設問の図：figures は大問と同じ形。figPos: below|right(問題文の下/右)
 function newItem(type) {
-  const f = { figures: [], figPos: 'below' };
+  const f = { figures: [], figPos: 'below', kanten: null };   // kanten: null = 大問と同じ観点
   // 選択肢：{text, img(store.images の id か null)}。choiceCols: 図の選択肢の並べ方(auto|1|2|4)、choiceH: 図の枠の高さ(mm)
   if (type === 'choice')  return { id: uid(), text: '', choices: [newChoice(), newChoice(), newChoice(), newChoice()], correct: 0, choiceCols: 'auto', choiceH: 30, ...f };
   if (type === 'tf')      return { id: uid(), text: '', correct: 0, ...f };          // 0=正しい 1=間違い
@@ -481,7 +487,7 @@ function newSection(type) {
   // figures: [{id, img(store.images の id), caption(見出し), width(用紙の幅の%), gray(白黒にする)}]  figPos: above|below|right(本文の上/下/右)
   // code: null(コードの欄なし) または プログラムの文字列。codePos: before|after(本文の前/後)。codeLines: 行番号を付けるか
   // codeKind: text(文字のコード)|blocks(ブロックの欄)。blockScale: ブロックの大きさ(%)
-  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, figures: [], figPos: 'above', code: null, codePos: 'before', codeLines: true, codeKind: 'text', blockScale: 100 };
+  const base = { id: uid(), type, title: '', lead: '', points: 2, collapsed: false, kanten: -1, figures: [], figPos: 'above', code: null, codePos: 'before', codeLines: true, codeKind: 'text', blockScale: 100 };
   if (type === 'blank')   return { ...base, text: '', distract: '', order: 'shuffle', seed: Math.floor(Math.random()*1e9), manual: '',
                                   bankNote: '※　同じ語句を何度使っても良い。使わない語句もある。' };
   if (type === 'choice')  return { ...base, items: [newItem('choice')] };
@@ -498,6 +504,7 @@ function migrate(ex) {
   ex.id = ex.id || uid();
   ex.name = ex.name || '無題のテスト';
   ex.meta = Object.assign(newMeta(), ex.meta || {});
+  ex.meta.kantenNames = Array.from({ length: KANTEN_MAX }, (_, k) => String((ex.meta.kantenNames || [])[k] ?? ''));
   ex.sections = (ex.sections || []).map(s => {
     const d = newSection(s.type in TYPE_NAMES ? s.type : 'blank');
     const m = Object.assign(d, s);
@@ -794,6 +801,8 @@ function compile(exam) {
     const sec = { no: si + 1, id: s.id, type: s.type, title: (s.title || '').trim(), lead: fr(s.lead, si).trim(), notes: [], points: num(s.points, 0) };
     if (!sec.title) W(si, '見出しが空です');
     sec.figPos = FIG_POS[s.figPos] ? s.figPos : 'above';
+    sec.kanten = kantenOk(m, s.kanten) ? s.kanten : -1;
+    const kOf = it => it.kanten == null ? sec.kanten : (kantenOk(m, it.kanten) ? it.kanten : -1);   // 設問の観点(空なら大問と同じ)
     sec.code = null; sec.codePos = CODE_POS[s.codePos] ? s.codePos : 'before';
     sec.figs = mkFigs(s.figures, si);
 
@@ -835,7 +844,7 @@ function compile(exam) {
       if (all.length > L.length) W(si, `語群が${all.length}個あり、記号が足りません（最大${L.length}個）`);
       else if (maxC && all.length > maxC) W(si, `語群が${all.length}個で、マークシートの最大選択肢数(${maxC})を超えています`);
       const items = all.map((t, i) => ({ label: L[i] || '？', text: t, isAnswer: uniq.includes(t) }));
-      blanks.forEach(b => { const idx = all.indexOf(b.term); C.answers.push({ no: b.n, label: L[idx] || '？', text: b.term, points: sec.points, sec: sec.no }); });
+      blanks.forEach(b => { const idx = all.indexOf(b.term); C.answers.push({ no: b.n, label: L[idx] || '？', text: b.term, points: sec.points, sec: sec.no, kanten: sec.kanten }); });
       let cols = num(m.bankCols, 0);
       if (!cols) { const mx = Math.max(0, ...all.map(vlen)); cols = mx <= 4 ? 5 : mx <= 7 ? 4 : mx <= 11 ? 3 : 2; }
       if (m.showRuby && !num(m.bankCols, 0)) cols = Math.max(2, cols - 1);   // ルビ付きは幅をとるので1段階ゆるめる
@@ -857,7 +866,7 @@ function compile(exam) {
         else if (maxC && keep.length > maxC) W(si, `（${n}）の選択肢数がマークシートの最大(${maxC})を超えています`);
         if (corr < 0) W(si, `（${n}）の正解が選ばれていません（空の選択肢が正解になっていないか確認）`);
         // 図だけの選択肢は、正答の文字を「（図）」として渡す(採点アプリは表示に使うだけ)
-        else C.answers.push({ no: n, label: L[corr], text: keep[corr].text || '（図）', points: sec.points, sec: sec.no });
+        else C.answers.push({ no: n, label: L[corr], text: keep[corr].text || '（図）', points: sec.points, sec: sec.no, kanten: kOf(it) });
         const imgMode = keep.some(c => c.img);
         let cols;
         if (imgMode) {   // 図の選択肢：自動なら4つまで2×2、6つまで3列、それより多いと4列
@@ -867,7 +876,7 @@ function compile(exam) {
           const vmax = Math.max(0, ...keep.map(c => vlen(c.text)));
           cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
         }
-        return { id: it.id, n, text: fr(it.text, si).trim(), ...itemFigs(it, si), cols: Math.max(1, cols), imgMode,
+        return { id: it.id, n, text: fr(it.text, si).trim(), kanten: kOf(it), ...itemFigs(it, si), cols: Math.max(1, cols), imgMode,
           choiceH: Math.min(80, Math.max(10, num(it.choiceH, 30))), choices: keep.map((c, i) => ({ label: L[i] || '？', ...c })) };
       });
     }
@@ -879,8 +888,8 @@ function compile(exam) {
         n++; C.itemNo[it.id] = n;
         const c = it.correct ? 1 : 0;
         if (!String(it.text || '').trim()) W(si, `（${n}）の文が空です`);
-        C.answers.push({ no: n, label: L[c], text: c ? fl : tl, points: sec.points, sec: sec.no });
-        return { id: it.id, n, text: fr(it.text, si).trim(), ...itemFigs(it, si) };
+        C.answers.push({ no: n, label: L[c], text: c ? fl : tl, points: sec.points, sec: sec.no, kanten: kOf(it) });
+        return { id: it.id, n, text: fr(it.text, si).trim(), kanten: kOf(it), ...itemFigs(it, si) };
       });
     }
 
@@ -888,7 +897,7 @@ function compile(exam) {
       sec.items = (s.items || []).map(it => {
         wn++; C.itemNo[it.id] = '記' + wn;
         if (!String(it.text || '').trim()) W(si, `記述${wn}の問題文が空です`);
-        const o = { id: it.id, k: wn, text: fr(it.text, si).trim(), ...itemFigs(it, si), answer: (it.answer || '').trim(), lines: Math.max(1, Math.round(num(it.lines, 3))), points: num(it.points, 0) };
+        const o = { id: it.id, k: wn, text: fr(it.text, si).trim(), kanten: kOf(it), ...itemFigs(it, si), answer: (it.answer || '').trim(), lines: Math.max(1, Math.round(num(it.lines, 3))), points: num(it.points, 0) };
         C.written.push({ ...o, sec: sec.no });
         return o;
       });
@@ -940,10 +949,18 @@ function qWrap(it, q, rest) {
 const figsHTML = F => `<div class="figs">${F.map(f => figHTML(f)).join('')}</div>`;
 const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
 
+/* 配点と観点の表示：「（各2点・知）」。記述は1問ずつ「（3点・思）」 */
+function pointsText(sec, m) {
+  const ps = m.showPoints && sec.type !== 'written' && sec.points ? `各${sec.points}点` : '';
+  const ka = m.showKanten && sec.type !== 'written' ? kantenAbbr(m, sec.kanten) : '';
+  return ps || ka ? `（${[ps, ka].filter(Boolean).join('・')}）` : '';
+}
+/* 設問の観点が大問と違うときだけ、問題文の後ろに「（思）」を付ける */
+const itemKantenText = (it, sec, m) => m.showKanten && it.kanten !== sec.kanten && kantenAbbr(m, it.kanten) ? `（${kantenAbbr(m, it.kanten)}）` : '';
+const writtenPtText = (it, m) => { const a = [m.showPoints && it.points ? `${it.points}点` : '', m.showKanten ? kantenAbbr(m, it.kanten) : ''].filter(Boolean); return a.length ? `（${a.join('・')}）` : ''; };
 function headingHTML(sec, m) {
-  let pt = '';
-  if (m.showPoints && sec.type !== 'written' && sec.points) pt = `<small>（各${sec.points}点）</small>`;
-  return `<h2><span class="no">${zen(sec.no)}</span><span>${escR(sec.title)}</span>${pt}</h2>`;
+  const pt = pointsText(sec, m);
+  return `<h2><span class="no">${zen(sec.no)}</span><span>${escR(sec.title)}</span>${pt ? `<small>${pt}</small>` : ''}</h2>`;
 }
 
 function renderPaperHTML(C, force) {
@@ -961,6 +978,7 @@ function renderPaperHTML(C, force) {
     sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
 
     let main = '', after = '';     // main = 本文(段落・設問)、after = 語群。図は main の上・下・右に置く
+    const kHTML = it => itemKantenText(it, sec, m) ? `<span class="pt">${itemKantenText(it, sec, m)}</span>` : '';
     if (sec.type === 'blank') {
       sec.paras.forEach((toks, i) => {
         main += `<p class="para${m.keepBank && i === sec.paras.length - 1 ? ' last' : ''}">` +
@@ -973,18 +991,18 @@ function renderPaperHTML(C, force) {
     }
     else if (sec.type === 'choice') {
       sec.items.forEach(it => {
-        main += qWrap(it, `<div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>`,
+        main += qWrap(it, `<div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}${kHTML(it)}</div>`,
           it.imgMode ? choiceImgsHTML(it) :
           `<div class="q-c" style="grid-template-columns:repeat(${it.cols},auto)">` +
           it.choices.map(c => `<div><span class="lab">${escR(c.label)}</span>${escR(c.text)}</div>`).join('') + '</div>');
       });
     }
     else if (sec.type === 'tf') {
-      sec.items.forEach(it => main += qWrap(it, `<div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}</div>`, ''));
+      sec.items.forEach(it => main += qWrap(it, `<div class="q-t"><span class="qn">（${it.n}）</span>${escR(it.text)}${kHTML(it)}</div>`, ''));
     }
     else if (sec.type === 'written') {
       sec.items.forEach(it => {
-        const pt = m.showPoints && it.points ? `<span class="pt">（${it.points}点）</span>` : '';
+        const pt = writtenPtText(it, m) ? `<span class="pt">${writtenPtText(it, m)}</span>` : '';
         main += qWrap(it, `<div class="q-t"><span class="qn">（記${it.k}）</span>${escR(it.text)}${pt}</div>`,
           `<div class="ansbox" style="height:${it.lines * 9}mm"></div>`);
       });
@@ -1036,12 +1054,15 @@ function buildKeyJSON(C, ex) {
     return { no: sec.no, title: plain(sec.title), type: sec.type, from: a.length ? a[0].no : null, to: a.length ? a[a.length - 1].no : null,
              points: a.reduce((t, x) => t + x.points, 0) + C.written.filter(w => w.sec === sec.no).reduce((t, x) => t + x.points, 0) };
   });
+  const useK = C.answers.some(a => a.kanten >= 0) || C.written.some(w => w.kanten >= 0);   // 観点を使っていないテストは、前の採点アプリでも読めるよう schema 1 のまま
+  const kk = v => (v >= 0 ? v : -1);
   return {
-    app: 'testmaker-answerkey', schema: 1, exportedAt: new Date().toISOString(),
+    app: 'testmaker-answerkey', schema: useK ? 2 : 1, exportedAt: new Date().toISOString(),
+    ...(useK ? { kanten: C.meta.kantenNames.map(x => String(x || '').trim()) } : {}),
     exam: { id: ex.id, name: ex.name, title: C.meta.title, date: C.meta.date },
     labels: C.labels.slice(0, Math.max(num(C.meta.maxChoices, 10), 1)), total: C.total,
-    items: C.answers.map(a => ({ no: a.no, section: a.sec, label: a.label, index: C.labels.indexOf(a.label) + 1, text: plain(a.text), points: a.points })),
-    written: C.written.map(w => ({ id: '記' + w.k, section: w.sec, answer: plain(w.answer), points: w.points, lines: w.lines })),
+    items: C.answers.map(a => ({ no: a.no, section: a.sec, label: a.label, index: C.labels.indexOf(a.label) + 1, text: plain(a.text), points: a.points, ...(useK ? { kanten: kk(a.kanten) } : {}) })),
+    written: C.written.map(w => ({ id: '記' + w.k, section: w.sec, answer: plain(w.answer), points: w.points, lines: w.lines, ...(useK ? { kanten: kk(w.kanten) } : {}) })),
     sections: secs
   };
 }
@@ -1244,7 +1265,8 @@ function buildDocx(C, imgs = new Map()) {
   };
   C.sections.forEach(sec => {
     const s0 = body.length;
-    const pt = (m.showPoints && sec.type !== 'written' && sec.points) ? [R(`　（各${sec.points}点）`, { sz: sz - 3 })] : [];
+    const pt = pointsText(sec, m) ? [R('　' + pointsText(sec, m), { sz: sz - 3 })] : [];
+    const kR = it => itemKantenText(it, sec, m) ? [R('　' + itemKantenText(it, sec, m), { sz: sz - 3 })] : [];
     body.push(P([R(' ' + zen(sec.no) + ' ', { b: true, color: 'FFFFFF', shd: '000000', sz: sz + 2 }), RR('　' + sec.title, { b: true, sz: sz + 2 }), ...pt],
       { keepNext: true, underline: true, before: 240, after: 80, line: 320, pbb: m.pageMode === 'section' && sec.no > 1 }));
     if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: 330, after: 40, keepNext: true }));
@@ -1271,7 +1293,7 @@ function buildDocx(C, imgs = new Map()) {
       }
       else if (sec.type === 'choice') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
-          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
           w => {
             const cols = it.cols, avail = w - IND, cw = Math.floor(avail / cols);
             const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
@@ -1285,12 +1307,12 @@ function buildDocx(C, imgs = new Map()) {
       }
       else if (sec.type === 'tf') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
-          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text)], { left: IND, hanging: IND, line: 340, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: 340, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
           () => '')));
       }
       else if (sec.type === 'written') {
         sec.items.forEach(it => {
-          const ptx = m.showPoints && it.points ? [R(`　（${it.points}点）`, { sz: sz - 3 })] : [];
+          const ptx = writtenPtText(it, m) ? [R('　' + writtenPtText(it, m), { sz: sz - 3 })] : [];
           main.push(itemXml(it, fw,
             () => P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
             w => TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w: w - IND, xml: P('') }] }], [w - IND], { ind: IND - 110, grid: true }) + SPACER(80)));
@@ -1763,6 +1785,9 @@ function settingsCard(ex) {
     h('div', { class: 'row' },
       field('マークシートの最大選択肢数', bindText(m, 'maxChoices', { type: 'number', min: 2, max: 20 }), 'これを超えると警告します'),
       h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
+    h('div', { class: 'field' }, h('span', {}, '観点の名前（採点アプリと同じ3つまで。問題用紙には頭の1字が「知」「思」のように出ます）'),
+      h('div', { class: 'row' }, ...m.kantenNames.map((_, k) => { const e = bindText(m.kantenNames, k, { cls: 'grow', ph: '観点' + (k + 1) }); e.addEventListener('change', renderEditor); return e; }))),
+    bindCheck(m, 'showKanten', '観点を問題用紙に表示（配点の横に「各2点・知」のように）'),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
     field('改ページ', bindSelect(m, 'pageMode', Object.entries(PAGE_MODES))),
     h('div', { class: 'row' },
@@ -1774,6 +1799,15 @@ function settingsCard(ex) {
   return d;
 }
 
+/* 観点を選ぶ欄。item=true は設問用(「大問と同じ」を選べる。null で持つ) */
+function kantenSel(obj, ex, item) {
+  const opts = [...(item ? [['same', '観点：大問と同じ']] : []), ['-1', item ? '観点：なし' : 'なし'],
+    ...ex.meta.kantenNames.map((n, k) => [String(k), (item ? '観点：' : '') + (String(n).trim() || `（観点${k + 1}：名前なし）`)])];
+  const e = h('select', {}, opts.map(([v, l]) => h('option', { value: v }, l)));
+  e.value = obj.kanten == null ? 'same' : String(obj.kanten);
+  e.addEventListener('change', () => { obj.kanten = e.value === 'same' ? null : Number(e.value); touch(); });
+  return e;
+}
 /* ---- 大問カード ---- */
 function delItem(s, qi) {
   const it = s.items[qi];
@@ -1803,7 +1837,9 @@ function sectionCard(s, i, ex) {
   card.addEventListener('drop', e => { card.classList.remove('drop'); if (e.dataTransfer.files.length) { e.preventDefault(); addFigures(s, e.dataTransfer.files); } });
   if (s.collapsed) return card;
 
-  const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })), figPanel(s), codePanel(s));
+  const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })),
+    h('label', { class: 'row', style: 'gap:6px;margin:2px 0 6px' }, h('span', { class: 'hint', style: 'margin:0' }, '観点（この大問）'), kantenSel(s, ex, false)),
+    figPanel(s), codePanel(s));
 
   if (s.type === 'blank') {
     const ta = bindText(s, 'text', { tag: 'textarea', rows: 9 });
@@ -1838,7 +1874,7 @@ function sectionCard(s, i, ex) {
     card.append(lead, field('1問の配点', bindText(s, 'points', { type: 'number', min: 0, step: 0.5 })));
     s.items.forEach((it, qi) => {
       const box = h('div', {},
-        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), h('span', { class: 'spacer' }),
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), kantenSel(it, ex, true), h('span', { class: 'spacer' }),
           btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
           btn('削除', () => delItem(s, qi), '', 'danger')),
         bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '問題文', cls: 'grow' }),
@@ -1880,7 +1916,7 @@ function sectionCard(s, i, ex) {
       const sel = h('select', {}, h('option', { value: 0 }, '正解：' + L[0] + '（' + (s.trueLabel || '正しい') + '）'), h('option', { value: 1 }, '正解：' + L[1] + '（' + (s.falseLabel || '間違っている') + '）'));
       sel.value = it.correct ? 1 : 0; sel.addEventListener('change', () => { it.correct = Number(sel.value); touch(); });
       card.append(itemBox(it,
-        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), sel, h('span', { class: 'spacer' }),
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), sel, kantenSel(it, ex, true), h('span', { class: 'spacer' }),
           btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
           btn('削除', () => delItem(s, qi), '', 'danger')),
         bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '判定させる文', cls: 'grow' })));
@@ -1892,7 +1928,7 @@ function sectionCard(s, i, ex) {
     card.append(lead);
     s.items.forEach((it, qi) => {
       card.append(itemBox(it,
-        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), h('span', { class: 'spacer' }),
+        h('div', { class: 'qhead' }, h('span', { class: 'qno', 'data-qid': it.id }, ''), kantenSel(it, ex, true), h('span', { class: 'spacer' }),
           btn('▲', () => { if (move(s.items, qi, -1)) { touch(); renderEditor(); } }), btn('▼', () => { if (move(s.items, qi, 1)) { touch(); renderEditor(); } }),
           btn('削除', () => delItem(s, qi), '', 'danger')),
         bindText(it, 'text', { tag: 'textarea', rows: 2, ph: '問題文', cls: 'grow' }),
@@ -2213,6 +2249,14 @@ function helpHTML() {
 <ul><li>本文の空欄にしたい語句を選んで「選択した語句を空欄にする」。<code>{{語句}}</code> と書いても同じです。</li>
 <li>語群は「正解の語句＋ダミー」から自動で作られます。ダミーは別の欄に1行ずつ。</li>
 <li>同じ空欄を文中でもう一度出すときは「同じ空欄をもう一度使う」（<code>{{@語句}}</code>）。</li></ul>
+<h4>体裁（行間・余白・改ページ・ページ数）</h4>
+<ul><li>「基本設定」で、文字の大きさ・行間（狭め／ふつう／広め）・余白（ふつう／狭め）を選べます。画面・印刷と Word は同じ行間・余白になります。</li>
+<li>改ページは、ふだんは「大問の途中ではページを変えない」です（入らない大問は次のページへ）。1ページに入らない大きな大問は、途中で分かれます。</li>
+<li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。</li></ul>
+<h4>観点</h4>
+<ul><li>「基本設定」で観点の名前（3つまで）を決め、大問ごとに観点を選びます。問題ごとに変えることもできます（問題の欄の「観点」）。</li>
+<li>配点の横に「（各2点・知）」のように、頭の1字が出ます。出したくないときは「観点を問題用紙に表示」を外します。</li>
+<li>観点は「採点用JSON」にも入り、採点アプリ（1.17以降）で読み込むと、観点も自動で入ります。</li></ul>
 <h4>図（画像）</h4>
 <ul><li>大問の「＋ 図を追加」で画像のファイルを選びます。<b>この大問の中で貼り付け（Ctrl+V）</b>や、画像をドラッグしても入ります（Scratch の画面のスクリーンショットなど）。</li>
 <li>置き場所は大問ごとに「本文の上／本文の下／本文の右」から選びます。大きさは用紙の幅に対する割合（%）です。</li>
