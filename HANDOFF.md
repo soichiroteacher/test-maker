@@ -20,6 +20,8 @@
 
 ## 次にやること
 
+0. **(2026-10-30 済)ページ下の文言は最後のページだけ**:Word は文末の段落を枠(`framePr` の `yAlign="bottom"`)にして最後のページの本文の下端に置く。フッターはページ番号だけ。印刷は `.pfoot` を問題の最後のあとに置く(CSS では最後のページの下端にだけ出せないため)。`settings.xml` の `updateFields` は、開くたびに「他のファイルを参照するフィールド」の確認が出るので外した。
+
 1. **(2026-10-29 済)残りのファイルを置いた**(ユーザーから受け取った testmaker-complete.zip から)
    - `ruby-engine.js`(自動ルビの辞書、約24MB。生成物)… GitHub には上げない(`.gitignore` で除外している)。appcopy にはコピーされる。
      別のPCで GitHub から取ったときは、appcopy か `tools/build-ruby-engine.js` で作り直して手に入れる。
