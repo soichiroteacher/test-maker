@@ -208,12 +208,11 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em;line-height:calc(1.6 * var(--ls,1))}
 .para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:calc(2 * var(--ls,1));orphans:2;widows:2}
 .blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .1em;white-space:nowrap}
-.bank{border:1.5px solid #000;margin:2mm 0 1mm;break-inside:avoid}
-.bank-h{border-bottom:1.5px solid #000;padding:.2mm 3mm;font-size:.95em}
+.bank{border:1px solid #000;margin:2mm 0 1mm;break-inside:avoid}   /* 枠線は細め(2026-10-30。太くてきついという声から) */
+.bank-h{border-bottom:1px solid #000;padding:.2mm 3mm;font-size:.95em}
 .bank-h span{margin-left:1em;font-size:.9em}
 .bank-g{display:grid;padding:1mm 2mm}
 .bank-g div{padding:.5mm 1mm;line-height:calc(1.65 * var(--ls,1))}
-.bank-g .lab{font-weight:400}
 .lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
 .q-t{text-indent:-3.9em;line-height:calc(1.7 * var(--ls,1))}
@@ -1188,7 +1187,8 @@ function P(runs, o = {}) {        // paragraph
 const SPACER = (h = 100) => `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="${h}" w:lineRule="exact"/></w:pPr></w:p>`;
 /* table: rows=[{cells:[{w,span,xml,shd,va(縦の位置)}],h,rule,split(ページをまたいでよい)}] */
 function TBL(rows, grid, o = {}) {
-  const bd = o.box ? '<w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/>'
+  const bz = o.thin ? 6 : 12;   // 枠線の太さ(1/8pt)。thin = 語群(細め)
+  const bd = o.box ? `<w:top w:val="single" w:sz="${bz}" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="${bz}" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="${bz}" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="${bz}" w:space="0" w:color="000000"/>`
     : o.grid ? '<w:top w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>' : '';
   const total = grid.reduce((a, b) => a + b, 0);
   let x = `<w:tbl><w:tblPr><w:tblW w:w="${total}" w:type="dxa"/>${o.jc ? `<w:jc w:val="${o.jc}"/>` : ''}${o.ind ? `<w:tblInd w:w="${o.ind}" w:type="dxa"/>` : ''}` +
@@ -1199,7 +1199,7 @@ function TBL(rows, grid, o = {}) {
     x += `<w:tr><w:trPr>${r.split ? '' : '<w:cantSplit/>'}${r.h ? `<w:trHeight w:val="${r.h}" w:hRule="${r.rule || 'atLeast'}"/>` : ''}</w:trPr>`;
     r.cells.forEach(c => {
       x += `<w:tc><w:tcPr><w:tcW w:w="${c.w}" w:type="dxa"/>${c.span > 1 ? `<w:gridSpan w:val="${c.span}"/>` : ''}` +
-        (c.bottom ? '<w:tcBorders><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000"/></w:tcBorders>' : '') +
+        (c.bottom ? `<w:tcBorders><w:bottom w:val="single" w:sz="${o.thin ? 6 : 8}" w:space="0" w:color="000000"/></w:tcBorders>` : '') +
         (c.shd ? `<w:shd w:val="clear" w:color="auto" w:fill="${c.shd}"/>` : '') + (c.va ? `<w:vAlign w:val="${c.va}"/>` : '') + `</w:tcPr>${c.xml}</w:tc>`;
     });
     x += '</w:tr>';
@@ -1254,7 +1254,7 @@ function buildDocx(C, imgs = new Map()) {
   const m = C.meta, FW = 11906 - Math.round(mg.x * MM) * 2, IND = 800; LSK = lsOf(m); RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
   BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
   const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
-  const lab = (t, thin) => R(t, { b: !thin, bdr: true });   // thin = 語群の記号(太字にしない)
+  const lab = t => R(t, { b: true, bdr: true });
   const body = [];
   // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
   const media = [], mediaOf = new Map(); let drawN = 0;
@@ -1361,11 +1361,11 @@ function buildDocx(C, imgs = new Map()) {
         const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
         const lines = chunk(b.items, cols);
         lines.forEach((ln, ri) => {
-          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, true), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
           for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
           rows.push({ cells });
         });
-        after.push(TBL(rows, grid, { box: true, padV: 25 }), SPACER(120));
+        after.push(TBL(rows, grid, { box: true, thin: true, padV: 25 }), SPACER(120));
       }
       else if (sec.type === 'choice') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
