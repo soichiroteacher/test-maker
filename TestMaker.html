@@ -337,6 +337,8 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
           <button type="button" id="bBackup">バックアップを保存する</button>
           <button type="button" id="bLoad">バックアップを読み込む</button>
           <button type="button" id="bHist">履歴から前の状態に戻す</button>
+          <hr><button type="button" id="bLog">編集の記録（誰が・いつ）</button>
+          <button type="button" id="bName">記録する名前を変える</button>
           <hr><button type="button" id="bFile">データファイル（保存先）を変える</button>
         </div></div>
       <div class="menu"><button type="button" class="btn" data-menu id="bHelpMenu">使い方 ▾</button>
@@ -386,6 +388,14 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 <input type="file" id="dictIn" accept=".json,application/json" hidden>
 <dialog id="dlgHelp"><div class="dlg" id="helpBody"></div></dialog>
 <dialog id="dlgFile"><div class="dlg" id="fileBody"></div></dialog>
+<dialog id="dlgLog"><div class="dlg"><h2>編集の記録</h2>
+  <p class="hint">データファイルを、誰が・いつ編集したかの記録です（新しい順。何を変えたかは記録しません。200件まで残します）。</p>
+  <div id="logBody"></div><div style="text-align:right;margin-top:10px"><button class="btn" onclick="this.closest('dialog').close()">閉じる</button></div></div></dialog>
+<dialog id="dlgName"><form class="dlg" id="nameForm" method="dialog"><h2>お名前を入れてください</h2>
+  <p>データファイルの「編集の記録」に、誰が・いつ編集したかを残します。<br>入れた名前はこのブラウザに覚えておくので、次からは入れなくてかまいません。</p>
+  <input type="text" id="nameIn" maxlength="30" placeholder="例：山田" style="width:100%;font-size:16px;padding:8px;border:1px solid var(--line);border-radius:8px">
+  <div class="hint" id="nameErr" style="color:var(--danger)"></div>
+  <div style="text-align:right;margin-top:10px"><button type="submit" class="btn primary">この名前で記録する</button></div></form></dialog>
 
 <script>
 'use strict';
@@ -1469,6 +1479,7 @@ function saveStore() {
   if (trial) { updateStatus(); return; }   // 見本で試している間は、どこにも書かない(本当のデータを守るため)
   gcImages();
   if (imgsDirty) { imgsDirty = false; idbSet('images', store.images).catch(e => { console.warn(e); imgsDirty = true; }); }
+  logTouch();
   lsSave();
   DF.dirty = true; dfWrite();
   updateStatus();
@@ -1489,6 +1500,7 @@ function snapshot(force, label) {
 }
 function touch() {
   const ex = cur(); ex.updatedAt = Date.now(); store.lastChangeAt = ex.updatedAt;
+  if (!trial && DF.state === 'ok' && !editorName()) askName();
   snapshot(false); saveSoon(); refreshSoon();
 }
 
@@ -1636,16 +1648,59 @@ const idbSet = (k, v) => idb('readwrite', s => s.put(v, k));
 function fileData() {
   store.exams.forEach(e => e.schema = SCHEMA);
   return { app: 'testmaker', kind: 'data', schema: SCHEMA, savedAt: new Date().toISOString(), current: store.current,
-    exams: store.exams, userDict: store.userDict, snaps: store.snaps, images: store.images,
+    exams: store.exams, userDict: store.userDict, snaps: store.snaps, images: store.images, editLog: store.editLog || [],
     lastBackupAt: store.lastBackupAt || 0, lastChangeAt: store.lastChangeAt || 0, lastSnapAt: store.lastSnapAt || 0 };
 }
 function storeFromData(d) {
   if (!d || d.app !== 'testmaker' || !Array.isArray(d.exams)) throw new Error('テスト問題メーカーのデータではありません');
-  const s = { v: 1, current: d.current, exams: d.exams.map(migrate), snaps: d.snaps || [], userDict: d.userDict || {}, images: d.images || {},
+  const s = { v: 1, current: d.current, exams: d.exams.map(migrate), snaps: d.snaps || [], userDict: d.userDict || {}, images: d.images || {}, editLog: normLog(d.editLog),
     lastBackupAt: d.lastBackupAt || 0, lastChangeAt: d.lastChangeAt || 0, lastSnapAt: d.lastSnapAt || 0 };
   if (!s.exams.length) s.exams.push(sampleExam());
   if (!s.exams.find(e => e.id === s.current)) s.current = s.exams[0].id;
   return s;
+}
+
+/* ---- 編集の記録(editLog)：誰が・いつ編集したかだけを残す(全アプリ共通のルール。何を変えたかは残さない) ----
+   形は [{ by, start, end }](時刻は ISO の文字列、新しいものが先)。データファイルにだけ意味がある(このブラウザの控えにも入る)。
+   この画面で最初に編集して保存したときに1件足し、そのあと保存するたびに end を今の時刻にする(閉じ忘れても最後に保存した時刻が残る)。
+   名前はこのブラウザ(localStorage)に覚える。見本で試している間は記録しない(saveStore が先に戻る)。
+   ほかの先生が編集中かどうかの印(editLock)は付けない(2026-10-30 にユーザーが「編集の記録だけでいい」と決めた)。 */
+const LOG_MAX = 200, NAME_KEY = 'testmaker:editor';
+const LOG_SESSION = new Date().toISOString();   // この画面の記録の目印(start と同じ値)
+function editorName() { try { return (localStorage.getItem(NAME_KEY) || '').trim(); } catch (e) { return ''; } }
+function normLog(a) { return Array.isArray(a) ? a.filter(x => x && x.by && x.start).map(x => ({ by: String(x.by), start: String(x.start), end: String(x.end || x.start) })).slice(0, LOG_MAX) : []; }
+function logTouch() {
+  if (DF.state !== 'ok' || !store.lastChangeAt || Date.parse(LOG_SESSION) > store.lastChangeAt) return;   // この画面ではまだ編集していない(開いただけ)
+  const by = editorName(); if (!by) return;   // 名前を聞いている途中。入れたらもう一度保存する(askName)
+  store.editLog = normLog(store.editLog);
+  const now = new Date().toISOString(), e = store.editLog.find(x => x.start === LOG_SESSION && x.by === by);
+  if (e) e.end = now; else store.editLog.unshift({ by, start: LOG_SESSION, end: now });
+  store.editLog = store.editLog.slice(0, LOG_MAX);
+}
+/* 名前を聞く。空では閉じられない(Esc でも閉じない) */
+function askName(change) {
+  const dlg = $('#dlgName'), inp = $('#nameIn');
+  if (dlg.open) return;
+  inp.value = editorName(); $('#nameErr').textContent = '';
+  dlg.oncancel = e => { if (!editorName()) e.preventDefault(); };
+  $('#nameForm').onsubmit = e => {
+    const v = inp.value.trim();
+    if (!v) { e.preventDefault(); $('#nameErr').textContent = '名前が空です。名前を入れてから押してください。'; inp.focus(); return; }
+    try { localStorage.setItem(NAME_KEY, v); } catch (er) { }
+    if (!editorName()) { e.preventDefault(); $('#nameErr').textContent = 'このブラウザに名前を覚えられませんでした。Chrome か Edge のふつうの画面（シークレットではない）で開いてください。'; return; }
+    if (change) { const x = (store.editLog || []).find(x => x.start === LOG_SESSION); if (x) x.by = v; }   // この画面の記録の名前も直す
+    toast(`「${v}」として編集の記録に残します`); saveStore();
+  };
+  dlg.showModal(); inp.focus();
+}
+function openLog() {
+  const list = normLog(store.editLog), d2 = t => { const d = new Date(t); return isNaN(d) ? '' : d; };
+  const day = d => `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`, hm = d => `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  $('#logBody').innerHTML = !list.length ? `<p>${DF.state === 'ok' ? 'まだ記録がありません。データファイルに保存する編集をすると、記録が残ります。' : '記録は、データファイルを使っているときに残ります（今はデータファイルを開いていません）。'}</p>`
+    : '<table class="hist"><tr><th>名前</th><th>日付</th><th>時刻（始めた〜最後に保存した）</th></tr>' + list.map(x => {
+      const a = d2(x.start), b = d2(x.end); if (!a) return '';
+      return `<tr><td>${esc(x.by)}</td><td>${day(a)}</td><td>${hm(a)} 〜 ${b ? (day(b) === day(a) ? '' : day(b) + ' ') + hm(b) : ''}</td></tr>`; }).join('') + '</table>';
+  $('#dlgLog').showModal();
 }
 
 /* データファイルに書く。書いている間に変更が来たら、終わってからもう一度書く */
@@ -2287,10 +2342,16 @@ function startTrial() {
   if (_saveT) saveStore();   // 書きかけの本当のデータを先に保存しておく
   const ex = sampleExam();
   trial = { store };
-  store = { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: clone(store.userDict || {}), images: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0 };
+  store = { v: 1, current: ex.id, exams: [ex], snaps: [], userDict: clone(store.userDict || {}), images: {}, lastBackupAt: 0, lastChangeAt: 0, lastSnapAt: 0, editLog: sampleLog() };
   AUTO_CACHE.clear(); $('#trialBar').hidden = false;
   renderAll(); renderFileBar(); updateStatus();
   toast('見本のテストを開きました。自由に直してみてください（保存はしません）');
+}
+// 見本の編集の記録(架空の名前)。きのう以前の日付にする(今より先の時刻が出ないように)
+function sampleLog() {
+  const at = (dd, h, m) => { const d = new Date(); d.setDate(d.getDate() - dd); d.setHours(h, m, 0, 0); return d.toISOString(); };
+  return [{ by: '見本 花子', start: at(1, 15, 20), end: at(1, 16, 5) }, { by: '見本 太郎', start: at(2, 10, 40), end: at(2, 11, 15) },
+          { by: '見本 花子', start: at(4, 16, 0), end: at(4, 17, 30) }, { by: '見本 次郎', start: at(7, 13, 10), end: at(7, 13, 25) }];
 }
 function endTrial(quiet) {
   if (!trial) return;
@@ -2316,7 +2377,7 @@ const TOUR = [
   { sel: '#preview', title: '問題用紙の見本', text: '入力するたびに、ここに問題用紙が出ます。「正答一覧」に切り替えると、正答を確かめられます。正解を決めていないなど、<b>確認すること</b>があるときもここに出ます。' },
   { sel: '#pvSeg', title: 'プレビューの大きさ', text: '見本が大きくて入力しづらいときは「小」か「なし」にします。「なし」のときに確認することがあると、上に「⚠ 確認すること」が出ます。' },
   { sel: '#bOut', title: '出力', text: 'できたら「出力 ▾」から選びます。<b>印刷／PDF</b>、<b>Word で出力</b>（細かく手直ししたいとき）、<b>採点用JSON</b>（マークシート採点アプリに正答・配点を渡す）、正答CSV があります。' },
-  { sel: '#bData', title: '保存とバックアップ', text: '作ったテストは、データファイルに<b>自動で</b>保存します（左の「データファイルに保存　時刻」で分かります）。「データ ▾」から、バックアップの保存・読み込みと、履歴から前の状態に戻すことができます。前のバックアップのあとに変更があると、黄色になります。' },
+  { sel: '#bData', title: '保存とバックアップ', text: '作ったテストは、データファイルに<b>自動で</b>保存します（左の「データファイルに保存　時刻」で分かります）。「データ ▾」から、バックアップの保存・読み込みと、履歴から前の状態に戻すことができます。前のバックアップのあとに変更があると、黄色になります。<br>はじめて編集したときに<b>お名前</b>を聞き、「データ ▾」→<b>「編集の記録」</b>で、誰が・いつ編集したかを見られます。' },
   { sel: '#bHelpMenu', title: '案内はここまでです', text: () => trial
       ? 'このまま見本のテストを自由に直したり、「出力」で印刷の見本を出したりしてみてください。保存はしません。<br>終わったら、上の青い帯の<b>「見本を終わって元に戻る」</b>を押します。<br>案内をもう一度見るとき・くわしい説明は、この「使い方 ▾」から。'
       : '案内をもう一度見るとき・くわしい説明は、この「使い方 ▾」から。<br>保存せずに触ってみたいときは、「使い方 ▾」→<b>「見本で試す」</b>がおすすめです。' },
@@ -2438,6 +2499,8 @@ function setupButtons() {
     fr.onload = () => { try { const d = JSON.parse(fr.result); const w = d.words || d.userDict; if (!w) throw new Error('辞書ではありません'); let n = 0; Object.keys(w).forEach(k => { if (!(k in store.userDict)) { store.userDict[k] = w[k]; n++; } }); dictChanged(); toast(`${n}語を追加しました`); if ($('#dlgRuby').open) openRubyDialog(); } catch (er) { alert('読み込めませんでした: ' + er.message); } };
     fr.readAsText(f); };
   $('#bHist').onclick = notInTrial(openHistory);
+  $('#bLog').onclick = openLog;   // 見本の間も見られる(見本の架空の記録)
+  $('#bName').onclick = notInTrial(() => askName(true));
   $('#bHelp').onclick = () => { $('#helpBody').innerHTML = helpHTML(); $('#dlgHelp').showModal(); };
   $('#bWord').onclick = () => withEngine(async () => {
     try {
@@ -2517,7 +2580,8 @@ function helpHTML() {
 <li>自動の読みは完全ではありません（「行った」「進数」など）。出力前に「ルビの確認・辞書」で一覧を見て、直した読みは登録しておくと次回以降も使われます。辞書はバックアップにも入ります。</li>
 <li>フォントは基本設定で選びます。教科書体は「UD デジタル 教科書体」（Windows10以降に標準搭載）。入っていないパソコンではWord／印刷とも別の字体になります。</li></ul>
 <h4>データの保存（データファイル）</h4>
-<ul><li>作ったテストは、データファイル（<code>${DATA_FILE_NAME}</code>）に<b>自動で</b>保存します。<b>TestMaker.html と同じフォルダ</b>に置くと、別のパソコン・ブラウザでも同じデータを使えます。</li>
+<ul><li><b>編集の記録</b>：データファイルに保存する編集をはじめてしたときに、お名前を聞きます（このブラウザに覚えるので、次からは聞きません）。「データ」→「編集の記録」で、誰が・いつ編集したか（始めた時刻〜最後に保存した時刻）を新しい順に見られます。何を変えたかは記録しません。名前は「データ」→「記録する名前を変える」で直せます。</li>
+<li>作ったテストは、データファイル（<code>${DATA_FILE_NAME}</code>）に<b>自動で</b>保存します。<b>TestMaker.html と同じフォルダ</b>に置くと、別のパソコン・ブラウザでも同じデータを使えます。</li>
 <li>はじめて開いたときに「データファイルを新しく作る」か「データファイルを開く」を選びます。あとから変えるときは、「データ」→「データファイル（保存先）を変える」。</li>
 <li>開き直したとき、ブラウザが「このファイルの編集を許可しますか？」とたずねることがあります。<b>「ファイルを編集」（または「許可」）</b>を押してください。</li>
 <li>画面上の帯が黄色・赤のときは、データファイルに保存できていません。帯のボタンを押してください。</li>

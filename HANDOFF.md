@@ -20,6 +20,8 @@
 
 ## 次にやること
 
+0. **(2026-10-30 済)編集の記録**(`../CLAUDE.md` の「編集中の表示と編集の記録」):`editLog`・`logTouch`・`askName`・`openLog`・`sampleLog`。データファイルの `editLog: [{by,start,end}]`(ISO 文字列、新しい順、`LOG_MAX` 200件)。古いファイルは `storeFromData` の `normLog` で空の記録になる。名前は localStorage `testmaker:editor`。この画面で最初に編集した保存で1件足し、保存のたびに `end` を進める(`saveStore` の中)。**`editLock`(ほかの先生が編集中の表示)は作っていない**:2026-10-30 にユーザーが「編集の記録だけでいい」と決めた(このアプリは閲覧だけの画面がなく、同時編集は今の `conflict` で止める)。
+
 0. **(2026-10-30 済)ページ下の文言は最後のページだけ**:Word は文末の段落を枠(`framePr` の `yAlign="bottom"`)にして最後のページの本文の下端に置く。フッターはページ番号だけ。印刷は `.pfoot` を問題の最後のあとに置く(CSS では最後のページの下端にだけ出せないため)。`settings.xml` の `updateFields` は、開くたびに「他のファイルを参照するフィールド」の確認が出るので外した。
 
 1. **(2026-10-29 済)残りのファイルを置いた**(ユーザーから受け取った testmaker-complete.zip から)
