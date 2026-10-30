@@ -187,11 +187,12 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
   font-size:var(--fs,11pt);line-height:1.75;transform-origin:top center}
 .sheet *{box-sizing:border-box}
 .p-date{text-align:right;font-size:9pt}
-.p-title{text-align:center;font-weight:700;font-size:1.3em;margin:2mm 0 0;line-height:1.4}
+.p-title{text-align:center;font-weight:700;font-size:1.3em;margin:2mm 0 4mm;line-height:1.4}
 .p-kind{text-align:center;font-weight:700;font-size:1.9em;letter-spacing:.35em;margin:0 0 3mm;line-height:1.3}
 /* 氏名欄：年・組・番は同じ幅(15mm)、名前は残りいっぱい。Word も同じ形(buildDocx) */
-.p-name{display:flex;align-items:flex-end;gap:2mm;margin:0 0 4mm auto;width:62%;font-size:1em}
-.p-name .ln{display:inline-block;border-bottom:1px solid #000;width:15mm;flex:none;height:1.6em}
+.p-name{display:flex;align-items:baseline;gap:2mm;margin:0 0 4mm auto;width:62%;font-size:1em;line-height:1.4}
+.p-name .ln{display:inline-block;border-bottom:1px solid #000;width:15mm;flex:none;line-height:1.05}
+.p-name .ln::before{content:'\200b'}   /* 中身のない下線にも字の高さを持たせ、字と同じ並び(ベースライン)にそろえる */
 .p-name .ln.w{flex:1;width:auto}
 /* 行間：--ls(行間の倍率)をかける。数字は Word の段落の行間(P の line ÷ 200)と同じ */
 .p-notice{border:1.5px solid #000;border-radius:3px;padding:2mm 4mm;margin:0 0 3mm;font-weight:700;font-size:.95em;line-height:calc(1.5 * var(--ls,1))}
@@ -212,6 +213,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .bank-h span{margin-left:1em;font-size:.9em}
 .bank-g{display:grid;padding:1mm 2mm}
 .bank-g div{padding:.5mm 1mm;line-height:calc(1.65 * var(--ls,1))}
+.bank-g .lab{font-weight:400}
 .lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
 .q-t{text-indent:-3.9em;line-height:calc(1.7 * var(--ls,1))}
@@ -402,7 +404,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 8;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 9;                       // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
@@ -410,6 +412,7 @@ const SCHEMA = 8;                       // データの形のバージョン。�
                                         // 6(2026-10-29): 選択肢を文字列から {text, img} に(図の選択肢)。設問に choiceCols・choiceH
                                         // 7(2026-10-29): 体裁に行間(lineSpacing)・余白(margin)・改ページ「大問の途中で変えない」(pageMode: keep)・ページ数(fitPages)
                                         // 8(2026-10-29): 観点。meta に kantenNames・showKanten、大問に kanten(-1=なし)、設問に kanten(null=大問と同じ)
+                                        // 9(2026-10-30): 図に hideCap(見出しを用紙に出さない。番号「図１」だけ出す)
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -575,7 +578,7 @@ function migrate(ex) {
   ex.sections = (ex.sections || []).map(s => {
     const d = newSection(s.type in TYPE_NAMES ? s.type : 'blank');
     const m = Object.assign(d, s);
-    const figs = a => (a || []).filter(f => f && f.img).map(f => Object.assign({ id: uid(), caption: '', width: 50, gray: false }, f));
+    const figs = a => (a || []).filter(f => f && f.img).map(f => Object.assign({ id: uid(), caption: '', width: 50, gray: false, hideCap: false }, f));
     if (m.items) m.items = m.items.map(it => {
       const o = Object.assign(newItem(m.type) || {}, it, { id: it.id || uid() });
       o.figures = figs(o.figures); if (!ITEM_FIG_POS[o.figPos]) o.figPos = 'below';
@@ -854,7 +857,7 @@ function compile(exam) {
     const no = figNo[f.id]; C.figNo[f.id] = no;
     const ok = !!getImg(f.img);
     if (!ok) W(si, `図${no}の画像が見つかりません（画像の入っていないファイルから読み込んだ可能性があります。図を入れ直してください）`);
-    const o = { no, img: f.img, caption: (f.caption || '').trim(), width: Math.min(100, Math.max(10, num(f.width, 50))), gray: !!f.gray, ok };
+    const o = { no, img: f.img, caption: f.hideCap ? '' : (f.caption || '').trim(), width: Math.min(100, Math.max(10, num(f.width, 50))), gray: !!f.gray, ok };
     C.figs.push(o); return o;
   });
   const itemFigs = (it, si) => ({ figs: mkFigs(it.figures, si), figPos: ITEM_FIG_POS[it.figPos] ? it.figPos : 'below' });
@@ -980,6 +983,11 @@ function compile(exam) {
     C.sections.push(sec);
   });
   C.total = C.answers.reduce((a, b) => a + b.points, 0) + C.written.reduce((a, b) => a + b.points, 0);
+  // 大問ごとの問題の数と点(見出しの配点の表示に使う)
+  C.sections.forEach(sec => {
+    sec.nQ = C.answers.filter(a => a.sec === sec.no).length;
+    sec.total = sec.type === 'written' ? (sec.items || []).reduce((a, it) => a + num(it.points, 0), 0) : sec.points * sec.nQ;
+  });
   return C;
 }
 
@@ -1016,10 +1024,12 @@ function qWrap(it, q, rest) {
 const figsHTML = F => `<div class="figs">${F.map(f => figHTML(f)).join('')}</div>`;
 const blankHTML = t => `<span class="blank">（${t.n == null ? '？' : t.n}）</span>`;
 
-/* 配点と観点の表示：「（各2点・知）」。記述は1問ずつ「（3点・思）」 */
+/* 配点と観点の表示：「（2点×7問　計14点・知）」。記述は見出しに合計「（計8点）」、1問ずつ「（3点・思）」 */
 function pointsText(sec, m) {
-  const ps = m.showPoints && sec.type !== 'written' && sec.points ? `各${sec.points}点` : '';
-  const ka = m.showKanten && sec.type !== 'written' ? kantenAbbr(m, sec.kanten) : '';
+  // 何点の問題が何問あり、大問で何点分か(2026-10-30。ユーザーの要望)。記述は1問ずつ点が違うので合計だけ
+  const ps = !m.showPoints ? '' : sec.type === 'written' ? (sec.total ? `計${sec.total}点` : '')
+    : sec.points && sec.nQ ? `${sec.points}点×${sec.nQ}問　計${sec.points * sec.nQ}点` : '';
+  const ka = m.showKanten && sec.type !== 'written' ? kantenAbbr(m, sec.kanten) : '';   // 記述の観点は1問ずつ出す
   return ps || ka ? `（${[ps, ka].filter(Boolean).join('・')}）` : '';
 }
 /* 設問の観点が大問と違うときだけ、問題文の後ろに「（思）」を付ける */
@@ -1033,7 +1043,7 @@ function headingHTML(sec, m) {
 function renderPaperHTML(C, force) {
   const m = C.meta; RUBY = !!(force || m.showRuby); AUTO = RUBY && !!(force || m.autoRuby); let h = '';
   if (m.date.trim()) h += `<div class="p-date">${escR(m.date)}</div>`;
-  h += `<div class="p-title">${escR(m.title)}</div><div class="p-kind">${escR(m.kind)}</div>`;
+  h += `<div class="p-title">${escR([m.title.trim(), m.kind.trim()].filter(Boolean).join('　'))}</div>`;   // 「問題用紙」はタイトルの後ろに同じ大きさで(2026-10-30。前は下に大きく出していた)
   if (m.showName) h += `<div class="p-name"><span class="ln"></span>年<span class="ln"></span>組<span class="ln"></span>番　名前<span class="ln w"></span></div>`;
   const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   if (nl.length) h += `<div class="p-notice">${nl.map(x => `<div>※　${escR(x)}</div>`).join('')}</div>`;
@@ -1244,7 +1254,7 @@ function buildDocx(C, imgs = new Map()) {
   const m = C.meta, FW = 11906 - Math.round(mg.x * MM) * 2, IND = 800; LSK = lsOf(m); RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
   BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
   const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
-  const lab = t => R(t, { b: true, bdr: true });
+  const lab = (t, thin) => R(t, { b: !thin, bdr: true });   // thin = 語群の記号(太字にしない)
   const body = [];
   // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
   const media = [], mediaOf = new Map(); let drawN = 0;
@@ -1308,8 +1318,7 @@ function buildDocx(C, imgs = new Map()) {
 
   // ---- ヘッダ部 ----
   if (m.date.trim()) body.push(P(R(m.date, { sz: 18 }), { jc: 'right' }));
-  body.push(P(RR(m.title, { b: true, sz: 28 }), { jc: 'center', before: 40, after: 20 }));
-  body.push(P(R(m.kind, { b: true, sz: 40, spacing: 80 }), { jc: 'center', after: 80 }));
+  body.push(P(RR([m.title.trim(), m.kind.trim()].filter(Boolean).join('　'), { b: true, sz: 28 }), { jc: 'center', before: 40, after: 120 }));
   if (m.showName) {   // 画面と同じ：年・組・番の欄は 15mm、名前は右端まで。字の幅は1字 = 字の大きさ(unit)で見積もる
     const x0 = Math.round(FW * 0.38), lw = Math.round(15 * MM);
     // 右そろえのタブなので、タブの位置は「下線＋その後の字(「　年」は2字、「　番　名前」は5字)」の右端
@@ -1352,7 +1361,7 @@ function buildDocx(C, imgs = new Map()) {
         const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
         const lines = chunk(b.items, cols);
         lines.forEach((ln, ri) => {
-          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, true), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
           for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
           rows.push({ cells });
         });
@@ -1888,7 +1897,7 @@ function settingsCard(ex) {
   if (ui.settingsOpen) d.open = true;
   d.addEventListener('toggle', () => ui.settingsOpen = d.open);
   d.append(
-    h('div', { class: 'row' }, field('実施日（右上に表示。空なら非表示）', bindText(m, 'date', { ph: 'R8.6.17(水)実施' })), field('「問題用紙」の部分', bindText(m, 'kind'))),
+    h('div', { class: 'row' }, field('実施日（右上に表示。空なら非表示）', bindText(m, 'date', { ph: 'R8.6.17(水)実施' })), field('「問題用紙」の部分（タイトルの後ろに付く）', bindText(m, 'kind'))),
     field('タイトル', bindText(m, 'title')),
     field('注意書き（枠で囲んで表示。1行1項目、先頭の※は自動）', bindText(m, 'notice', { tag: 'textarea', rows: 3 })),
     field('全体の指示文（注意書きの下。空なら非表示）', bindText(m, 'intro', { tag: 'textarea', rows: 2 })),
@@ -1906,7 +1915,7 @@ function settingsCard(ex) {
       h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
     h('div', { class: 'field' }, h('span', {}, '観点の名前（採点アプリと同じ3つまで。問題用紙には頭の1字が「知」「思」のように出ます）'),
       h('div', { class: 'row' }, ...m.kantenNames.map((_, k) => { const e = bindText(m.kantenNames, k, { cls: 'grow', ph: '観点' + (k + 1) }); e.addEventListener('change', renderEditor); return e; }))),
-    bindCheck(m, 'showKanten', '観点を問題用紙に表示（配点の横に「各2点・知」のように）'),
+    bindCheck(m, 'showKanten', '観点を問題用紙に表示（配点の横に「2点×7問　計14点・知」のように）'),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
     field('改ページ', bindSelect(m, 'pageMode', Object.entries(PAGE_MODES))),
     h('div', { class: 'row' },
@@ -2076,6 +2085,8 @@ function figPanel(s, item) {
   s.figures.forEach((f, fi) => {
     const cap = bindText(f, 'caption', { ph: '見出し（例：回路図）', cls: 'grow figcap' });
     const gray = h('input', { type: 'checkbox' }); gray.checked = !!f.gray;
+    const hideCap = h('input', { type: 'checkbox' }); hideCap.checked = !!f.hideCap;
+    hideCap.addEventListener('change', () => { f.hideCap = hideCap.checked; touch(); });
     const thumb = h('img', { src: imgURL(f.img), alt: '', class: 'thumb' + (f.gray ? ' gray' : '') });
     gray.addEventListener('change', () => { f.gray = gray.checked; thumb.classList.toggle('gray', f.gray); touch(); });
     const noDown = e => e.preventDefault();   // 押しても本文のカーソルが外れないように
@@ -2086,6 +2097,7 @@ function figPanel(s, item) {
         h('div', { class: 'row', style: 'margin-top:4px' },
           h('label', { class: 'row', style: 'gap:4px' }, '大きさ', bindText(f, 'width', { type: 'number', min: 10, max: 100, step: 5, cls: 'w5' }), '%'),
           h('label', { class: 'row', style: 'gap:4px' }, gray, '白黒にする'),
+          h('label', { class: 'row', style: 'gap:4px', title: '図の下には「図１」だけ出します。〔図:見出し〕で番号を指すのには、そのまま使えます' }, hideCap, '見出しを用紙に出さない'),
           h('button', { type: 'button', class: 'btn small', onmousedown: noDown, onclick: () => insertFigRef(f), title: 'クリックしておいた入力欄のカーソルの位置に〔図:見出し〕を入れます' }, '本文に番号を入れる'),
           btn('▲', () => { if (move(s.figures, fi, -1)) { touch(); renderEditor(); } }, '前へ'),
           btn('▼', () => { if (move(s.figures, fi, 1)) { touch(); renderEditor(); } }, '後ろへ'),
@@ -2558,7 +2570,7 @@ function helpHTML() {
 <li>「最後のページの下の文言」（著作権表示・無断転載禁止など）は、最後のページにだけ出ます。Word は最後のページの下、印刷／PDF は問題の最後のすぐ下です。</li></ul>
 <h4>観点</h4>
 <ul><li>「基本設定」で観点の名前（3つまで）を決め、大問ごとに観点を選びます。問題ごとに変えることもできます（問題の欄の「観点」）。</li>
-<li>配点の横に「（各2点・知）」のように、頭の1字が出ます。出したくないときは「観点を問題用紙に表示」を外します。</li>
+<li>配点の横に「（2点×7問　計14点・知）」のように、頭の1字が出ます。出したくないときは「観点を問題用紙に表示」を外します。</li>
 <li>観点は「採点用JSON」にも入り、採点アプリ（1.17以降）で読み込むと、観点も自動で入ります。</li></ul>
 <h4>図（画像）</h4>
 <ul><li>大問の「＋ 図を追加」で画像のファイルを選びます。<b>この大問の中で貼り付け（Ctrl+V）</b>や、画像をドラッグしても入ります（Scratch の画面のスクリーンショットなど）。</li>
@@ -2566,6 +2578,7 @@ function helpHTML() {
 <li>選択問題の選択肢も図にできます（選択肢の横の「画像」、または選択肢の欄で貼り付け）。図は同じ高さの枠にそろえて並びます。並べ方（自動・1列・2列・4列）と図の高さ（mm）を選べます。文字を書くと図の下に出ます。</li>
 <li>選択・正誤・記述の問題は、1問ずつにも図を入れられます（「＋ この問題に図」。その問題の欄で貼り付けても入ります）。置き場所は「問題文の下／問題文の右」です。</li>
 <li>番号（図１・図２…）はテスト全体の通し番号で、用紙に出る順に自動で付きます。本文で図を指すときは <code>〔図:見出し〕</code> と書くと、その図の番号に置き換わります。「本文に番号を入れる」を押すと、クリックしておいた入力欄に入ります。</li>
+<li>図ごとに「見出しを用紙に出さない」を選ぶと、図の下には「図１」だけが出ます（〔図:見出し〕で番号を指すのには、そのまま使えます）。</li>
 <li>白黒で印刷するので、色の付いた図は「白黒にする」で見え方を確かめておくと安心です。</li>
 <li>大きな画像は、読み込むときに自動で小さくします。図は、印刷／PDF にも Word 出力にも入ります。</li></ul>
 <h4>コードの欄（プログラム）</h4>
