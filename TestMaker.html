@@ -306,7 +306,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   .pt td{padding:0}
   .pt thead td{height:var(--mt,14mm)}
   .pt tfoot td{height:var(--mb,16mm)}
-  .pfoot{position:fixed;left:var(--mx,14mm);right:var(--mx,14mm);bottom:5mm;font-size:8pt;line-height:1.3;color:#000}
+  .pfoot{margin-top:8mm;padding:0 var(--mx,14mm);font-size:8pt;line-height:1.3;color:#000;break-inside:avoid}   /* 最後のページだけ(問題の最後のあと) */
   #printRoot .sheet{padding:0 var(--mx,14mm)!important}
   .sec.keep{break-inside:avoid}
 }
@@ -1391,18 +1391,22 @@ function buildDocx(C, imgs = new Map()) {
     }
     if (m.pageMode === 'keep') body.push(keepAll(body.splice(s0).join('')));
   });
+  // ページ下の文言(著作権表示など)は、最後のページの下にだけ出す(2026-10-30。全ページに出ていたのを直した)。
+  // 文末の段落を「枠」(framePr)にして、その段落のあるページ(=最後のページ)の本文の下端にそろえる
+  if (m.footer.trim()) body.push(`<w:p><w:pPr><w:framePr w:w="${FW}" w:wrap="around" w:vAnchor="margin" w:hAnchor="margin" w:yAlign="bottom"/><w:spacing w:before="0" w:after="0"/></w:pPr>${R(m.footer.trim(), { sz: 16 })}</w:p>`);
   body.push(P(''));   // 本文末は必ず段落で終える
 
   const NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
   const NSD = NS + ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
   const sect = `<w:sectPr><w:footerReference w:type="default" r:id="rId3"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="${Math.round(mg.t * MM)}" w:right="${Math.round(mg.x * MM)}" w:bottom="${Math.round(mg.b * MM)}" w:left="${Math.round(mg.x * MM)}" w:header="567" w:footer="400" w:gutter="0"/></w:sectPr>`;
   const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${NSD}><w:body>${body.join('')}${sect}</w:body></w:document>`;
+  // フッターはページ番号だけ(全ページ)。ページ番号のフィールドは Word が開くときに自動で数える
   const ftr = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ${NS}><w:p><w:pPr><w:tabs><w:tab w:val="right" w:pos="${FW}"/></w:tabs><w:spacing w:before="0" w:after="0"/></w:pPr>` +
-    R(m.footer.trim(), { sz: 16 }) + TAB +
+    TAB +
     '<w:fldSimple w:instr=" PAGE "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple>' + R(' / ', { sz: 18 }) +
     '<w:fldSimple w:instr=" NUMPAGES "><w:r><w:rPr><w:sz w:val="18"/></w:rPr><w:t>1</w:t></w:r></w:fldSimple></w:p></w:ftr>';
   const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${NS}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:eastAsia="${font}" w:cs="${font}" w:hint="eastAsia"/><w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/><w:lang w:val="en-US" w:eastAsia="ja-JP" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`;
-  const settings = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:updateFields w:val="true"/><w:defaultTabStop w:val="840"/><w:characterSpacingControl w:val="compressPunctuation"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
+  const settings = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${NS}><w:defaultTabStop w:val="840"/><w:characterSpacingControl w:val="compressPunctuation"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>`;
   const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>';
   const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>';
   const drels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>' +
@@ -1854,7 +1858,7 @@ function settingsCard(ex) {
       h('label', { class: 'row', style: 'gap:4px' }, bindText(m, 'fitPages', { type: 'number', min: 1, max: 20, cls: 'w5' }), 'ページ'),
       h('button', { type: 'button', class: 'btn small primary', onclick: fitToPages }, 'このページ数に収める'),
       h('span', { class: 'hint', style: 'margin:0' }, '文字の大きさ・行間・余白を自動で決めます（そのあと手で直せます）')),
-    field('ページ下の文言（著作権表示など）', bindText(m, 'footer'))
+    field('最後のページの下の文言（著作権表示など）', bindText(m, 'footer'))
   );
   return d;
 }
@@ -2245,7 +2249,7 @@ function renderAll() { renderExamSel(); renderEditor(); }
 function doPrint() {
   const ft = esc(cur().meta.footer || '');
   const mg = mgOf(cur().meta); $('#printRoot').style.cssText = `--mx:${mg.x}mm;--mt:${mg.t}mm;--mb:${mg.b}mm`;
-  $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}</td></tr></tbody></table><div class="pfoot">${ft}</div>`;
+  $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}${ft ? `<div class="pfoot">${ft}</div>` : ''}</td></tr></tbody></table>`;
   const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' : '_正答一覧');
   window.print(); document.title = old;
 }
