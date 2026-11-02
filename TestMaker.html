@@ -214,6 +214,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .bank-h span{margin-left:1em;font-size:.9em}
 .bank-g{display:grid;padding:1mm 2mm}
 .bank-g div{padding:.5mm 1mm;line-height:calc(1.65 * var(--ls,1))}
+.bank-g.sm{font-size:calc(var(--fs,11pt) - 1pt)}   /* 語群を詰める(bankSmall)：本文より1pt小さく */
 .lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
 .q-t{text-indent:-3.9em;line-height:calc(1.7 * var(--ls,1))}
@@ -404,7 +405,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 10;                      // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 11;                      // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
@@ -414,6 +415,7 @@ const SCHEMA = 10;                      // データの形のバージョン。�
                                         // 8(2026-10-29): 観点。meta に kantenNames・showKanten、大問に kanten(-1=なし)、設問に kanten(null=大問と同じ)
                                         // 9(2026-10-30): 図に hideCap(見出しを用紙に出さない。番号「図１」だけ出す)
                                         // 10(2026-10-31): meta に grade(氏名欄の「年」に最初から入れる学年。空なら空欄)。古いデータは newMeta の '' になる
+                                        // 11(2026-11-02): meta に bankSmall(語群の字を本文より1pt小さくし、列を増やす)・choiceWide(選択肢をなるべく横に並べる)。古いデータは false
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -463,6 +465,17 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const pad2 = n => String(n).padStart(2,'0');
 const stamp = (t=Date.now()) => { const d=new Date(t); return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}`; };
 const fmtTime = t => { const d=new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+/* 詰めるときの幅の見積もり(mm)。字の幅 ≒ 字の大きさ(1pt = 0.3528mm) */
+const charMM = pt => pt * 0.3528;
+const bankW = m => 210 - 2 * mgOf(m).x - 8;   // 語群の枠の中の幅(枠の内側の空きを引く)
+// 選択肢1行に入る字数。大問の図が右なら、その分せまい。設問の図が右でもせまい。ルビ付きは少し余裕を見る
+function choiceChars(m, s, it) {
+  let w = 210 - 2 * mgOf(m).x - charMM(m.size) * 2;   // 選択肢は（１）の分、字下げしている
+  const fw = list => Math.min(60, Math.max(20, ...(list || []).filter(f => f && f.img).map(f => num(f.width, 50))));
+  if (s.figPos === 'right' && (s.figures || []).some(f => f && f.img)) w *= 1 - fw(s.figures) / 100;
+  if (it.figPos === 'right' && (it.figures || []).some(f => f && f.img)) w *= 1 - fw(it.figures) / 100;
+  return w / charMM(m.size) * (m.showRuby ? 0.85 : 1);
+}
 const vlen = s => { let n=0; for (const ch of plain(s)) n += /[\x20-\x7e]/.test(ch) ? 0.55 : 1; return n; };
 const hash32 = str => { let h=2166136261; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; };
 /* ルビ記法：[漢字|かんじ]。ルビ表示OFFのときは漢字だけを出す */
@@ -538,7 +551,7 @@ function newMeta() {
     date: '', title: '令和　年度　　学年　　　　　第　学期定期テスト', kind: '問題用紙',
     notice: 'マークシートは機械で読み取ります。解答用紙の記入例を参考に、枠からはみ出さないよう、濃くていねいに塗りつぶしなさい。\n読み取れないものや、２か所以上塗りつぶしたものは、原則として×とします。',
     intro: '各問題の指示にしたがって、解答用紙のマークシートの記号を塗りつぶしなさい。',
-    showName: true, grade: '', font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
+    showName: true, grade: '', bankSmall: false, choiceWide: false, font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
     showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'keep', keepBank: true,
     lineSpacing: 'normal', margin: 'normal', fitPages: 2,
     kantenNames: ['知識・技能', '思考・判断・表現', '主体的に学習に取り組む態度'], showKanten: true,
@@ -918,7 +931,12 @@ function compile(exam) {
       const items = all.map((t, i) => ({ label: L[i] || '？', text: t, isAnswer: uniq.includes(t) }));
       blanks.forEach(b => { const idx = all.indexOf(b.term); C.answers.push({ no: b.n, label: L[idx] || '？', text: b.term, points: sec.points, sec: sec.no, kanten: sec.kanten }); });
       let cols = num(m.bankCols, 0);
-      if (!cols) { const mx = Math.max(0, ...all.map(vlen)); cols = mx <= 4 ? 5 : mx <= 7 ? 4 : mx <= 11 ? 3 : 2; }
+      if (!cols) {
+        const mx = Math.max(0, ...all.map(vlen));
+        cols = mx <= 4 ? 5 : mx <= 7 ? 4 : mx <= 11 ? 3 : 2;
+        // 語群を詰める：字が1pt小さい分も入れて、用紙の幅に実際に入る列の数にする(記号の枠と空きで約3字分)。2〜5列
+        if (m.bankSmall) cols = Math.max(cols, Math.min(5, Math.floor(bankW(m) / ((mx + 3) * charMM(m.size - 1)))));
+      }
       if (m.showRuby && !num(m.bankCols, 0)) cols = Math.max(2, cols - 1);   // ルビ付きは幅をとるので1段階ゆるめる
       sec.bank = { items, cols, note: (s.bankNote || '').trim() };
       sec.blankMap = blanks.map(b => ({ n: b.n, label: L[all.indexOf(b.term)] || '？', term: b.term }));
@@ -947,6 +965,12 @@ function compile(exam) {
         } else {
           const vmax = Math.max(0, ...keep.map(c => vlen(c.text)));
           cols = (vmax <= 6 && keep.length <= 5) ? keep.length : (vmax <= 15 ? 2 : 1);
+          // なるべく横に並べる：幅に入るいちばん多い列(1行に全部→3列→2列)。Word は列の幅が同じなので、いちばん長い選択肢で測る
+          if (m.choiceWide) {
+            const fit = c => c * (vmax + 3) <= choiceChars(m, s, it), k = keep.length;
+            const best = [k <= 6 ? k : 0, k > 4 && k % 3 === 0 ? 3 : 0, 3, 2].find(c => c >= 2 && c <= k && fit(c));
+            if (best) cols = Math.max(cols, best);
+          }
         }
         return { id: it.id, n, text: fr(it.text, si).trim(), kanten: kOf(it), ...itemFigs(it, si), cols: Math.max(1, cols), imgMode,
           choiceH: Math.min(80, Math.max(10, num(it.choiceH, 30))), choices: keep.map((c, i) => ({ label: L[i] || '？', ...c })) };
@@ -1065,7 +1089,7 @@ function renderPaperHTML(C, force) {
       });
       const b = sec.bank;
       after += `<div class="bank"><div class="bank-h"><b>語群</b>${b.note ? `<span>${escR(b.note)}</span>` : ''}</div>` +
-        `<div class="bank-g" style="grid-template-columns:repeat(${b.cols},1fr)">` +
+        `<div class="bank-g${m.bankSmall ? ' sm' : ''}" style="grid-template-columns:repeat(${b.cols},1fr)">` +
         b.items.map(it => `<div><span class="lab">${escR(it.label)}</span>${escR(it.text)}</div>`).join('') + '</div></div>';
     }
     else if (sec.type === 'choice') {
@@ -1257,7 +1281,8 @@ function buildDocx(C, imgs = new Map()) {
   const m = C.meta, FW = 11906 - Math.round(mg.x * MM) * 2, IND = 800; LSK = lsOf(m); RUBY = !!m.showRuby; AUTO = RUBY && !!m.autoRuby; BASE_SZ = Math.round(m.size * 2);
   BOLD_FONT = /(NP|N)-R$/.test(m.font) ? m.font.replace(/(NP|N)-R$/, '$1-B') : null;   // 教科書体は太字用ファミリを使う
   const font = X(m.font), sz = Math.round(m.size * 2), unit = Math.round(m.size * 20);
-  const lab = t => R(t, { b: true, bdr: true });
+  const lab = (t, o = {}) => R(t, { b: true, bdr: true, ...o });
+  const bsz = m.bankSmall ? { sz: sz - 2 } : {};   // 語群を詰める：本文より1pt小さく(sz は半ポイント)
   const body = [];
   // 図：word/media/ に入れる画像。同じ画像(白黒も同じ)は1つのファイルを何度も使う
   const media = [], mediaOf = new Map(); let drawN = 0;
@@ -1369,7 +1394,7 @@ function buildDocx(C, imgs = new Map()) {
         const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
         const lines = chunk(b.items, cols);
         lines.forEach((ln, ri) => {
-          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label), RR('　' + it.text)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, bsz), RR('　' + it.text, bsz)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
           for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
           rows.push({ cells });
         });
@@ -1926,6 +1951,8 @@ function settingsCard(ex) {
       h('div', { class: 'row' }, ...m.kantenNames.map((_, k) => { const e = bindText(m.kantenNames, k, { cls: 'grow', ph: '観点' + (k + 1) }); e.addEventListener('change', renderEditor); return e; }))),
     bindCheck(m, 'showKanten', '観点を問題用紙に表示（配点の横に「2点×7問　計14点・知」のように）'),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
+    bindCheck(m, 'bankSmall', '語群を詰める（語群の字を本文より1pt小さくし、列の数が「自動」なら列を増やす）'),
+    bindCheck(m, 'choiceWide', '選択肢をなるべく横に並べる（幅に入るなら1行に、入らなければ3列・2列に）'),
     field('改ページ', bindSelect(m, 'pageMode', Object.entries(PAGE_MODES))),
     h('div', { class: 'row' },
       h('label', { class: 'row', style: 'gap:4px' }, bindText(m, 'fitPages', { type: 'number', min: 1, max: 20, cls: 'w5' }), 'ページ'),
@@ -2279,18 +2306,25 @@ const FIT_ORDER = [[12, 'loose', 'normal'], [12, 'normal', 'normal'], [11, 'loos
   [10.5, 'normal', 'normal'], [10.5, 'tight', 'normal'], [10.5, 'tight', 'narrow'], [10, 'normal', 'normal'], [10, 'tight', 'normal'], [10, 'tight', 'narrow']];
 function fitToPages() {
   const ex = cur(), N = Math.max(1, Math.round(num(ex.meta.fitPages, 2)));
+  // 本文の大きさ・行間・余白の1段ごとに、まずそのまま → 選択肢を横に並べる → 語群も詰める、の順に試す。
+  // 本文を小さくする前に、語群・選択肢で詰める(2026-11-02。ユーザーの要望)。先生が自分でオンにしたものは外さない
+  const M = ex.meta, VAR = [{}, { choiceWide: true }, { choiceWide: true, bankSmall: true }]
+    .map(v => ({ choiceWide: !!(M.choiceWide || v.choiceWide), bankSmall: !!(M.bankSmall || v.bankSmall) }))
+    .filter((v, i, a) => a.findIndex(x => x.choiceWide === v.choiceWide && x.bankSmall === v.bankSmall) === i);
   let hit = null, last = 0;
-  for (const [size, lineSpacing, margin] of FIT_ORDER) {
-    last = countPages(ex, { size, lineSpacing, margin });
-    if (last <= N) { hit = { size, lineSpacing, margin, pages: last }; break; }
+  search: for (const [size, lineSpacing, margin] of FIT_ORDER) {
+    for (const v of VAR) {
+      last = countPages(ex, { size, lineSpacing, margin, ...v });
+      if (last <= N) { hit = { size, lineSpacing, margin, ...v, pages: last }; break search; }
+    }
   }
   if (!hit) {
     const tip = ex.meta.pageMode !== 'flow' ? '\n（改ページを「続けて詰める」にすると、大問の途中でもページが変わるので、もう少し詰まります）' : '';
     alert(`いちばん小さくしても ${N} ページに収まりません（約 ${last} ページになります）。\n問題を減らすか、ページ数を増やしてください。${tip}`); return;
   }
-  Object.assign(ex.meta, { size: hit.size, lineSpacing: hit.lineSpacing, margin: hit.margin });
+  Object.assign(ex.meta, { size: hit.size, lineSpacing: hit.lineSpacing, margin: hit.margin, choiceWide: hit.choiceWide, bankSmall: hit.bankSmall });
   AUTO_CACHE.clear(); touch(); renderEditor();
-  alert(`${N} ページに収まるように、次の設定にしました（印刷で約 ${hit.pages} ページ）。\n\n文字の大きさ：${hit.size}pt\n行間：${LINE_SPACING[hit.lineSpacing][0]}\n余白：${MARGINS[hit.margin][0]}\n\nWord では、ページの分け方を Word が決めるので、1ページずれることがあります。\nこのあと、手で直してもかまいません。`);
+  alert(`${N} ページに収まるように、次の設定にしました（印刷で約 ${hit.pages} ページ）。\n\n文字の大きさ：${hit.size}pt\n行間：${LINE_SPACING[hit.lineSpacing][0]}\n余白：${MARGINS[hit.margin][0]}\n選択肢をなるべく横に並べる：${hit.choiceWide ? 'する' : 'しない'}\n語群を詰める：${hit.bankSmall ? 'する' : 'しない'}\n\nWord では、ページの分け方を Word が決めるので、1ページずれることがあります。\nこのあと、手で直してもかまいません。`);
 }
 
 /* 用紙の字・行間・余白の指定(画面・印刷・ページ数を数えるときに使う) */
@@ -2575,7 +2609,8 @@ function helpHTML() {
 <h4>体裁（行間・余白・改ページ・ページ数）</h4>
 <ul><li>「基本設定」で、文字の大きさ・行間（狭め／ふつう／広め）・余白（ふつう／狭め）を選べます。画面・印刷と Word は同じ行間・余白になります。</li>
 <li>改ページは、ふだんは「大問の途中ではページを変えない」です（入らない大問は次のページへ）。1ページに入らない大きな大問は、途中で分かれます。</li>
-<li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。</li>
+<li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。本文の字を小さくする前に、まず「選択肢をなるべく横に並べる」「語群を詰める」を試します。</li>
+<li><b>「語群を詰める」</b>は、語群の字を本文より1pt小さくし、列の数が「自動」なら入るだけ列を増やします（5列まで）。<b>「選択肢をなるべく横に並べる」</b>は、文字の選択肢を、幅に入るなら1行に、入らなければ3列・2列に並べます。どちらも「基本設定」で自分でオン・オフできます。</li>
 <li>「最後のページの下の文言」（著作権表示・無断転載禁止など）は、最後のページにだけ出ます。Word は最後のページの下、印刷／PDF は問題の最後のすぐ下です。</li>
 <li>「氏名欄の学年」に学年（例：1）を入れると、氏名欄の「年」の前に最初から入ります。空なら空欄です。</li></ul>
 <h4>観点</h4>
