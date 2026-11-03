@@ -1162,7 +1162,8 @@ function buildKeyJSON(C, ex) {
   return {
     app: 'testmaker-answerkey', schema: useK ? 2 : 1, exportedAt: new Date().toISOString(),
     ...(useK ? { kanten: C.meta.kantenNames.map(x => String(x || '').trim()) } : {}),
-    exam: { id: ex.id, name: ex.name, title: C.meta.title, date: C.meta.date },
+    // grade・notice は 2026-11-04 に足した(採点アプリ v1.22 が学年と解答用紙の注意書きに使う)。足すだけで前の採点アプリも読めるので schema は上げない
+    exam: { id: ex.id, name: ex.name, title: C.meta.title, date: C.meta.date, grade: String(C.meta.grade || ''), notice: plain(C.meta.notice || '') },
     labels: C.labels.slice(0, Math.max(num(C.meta.maxChoices, 10), 1)), total: C.total,
     items: C.answers.map(a => ({ no: a.no, section: a.sec, label: a.label, index: C.labels.indexOf(a.label) + 1, text: plain(a.text), points: a.points, ...(useK ? { kanten: kk(a.kanten) } : {}) })),
     written: C.written.map(w => ({ id: '記' + w.k, section: w.sec, answer: plain(w.answer), points: w.points, lines: w.lines, ...(useK ? { kanten: kk(w.kanten) } : {}) })),
