@@ -26,7 +26,7 @@
 
 ```
 testmaker/
-  TestMaker.html        アプリ本体（HTML1ファイル。約100KB。外部通信なし）
+  index.html        アプリ本体（HTML1ファイル。約100KB。外部通信なし）
   ruby-engine.js        自動ルビ用辞書エンジン（約24MB。生成物。無くても他機能は動く）
   README.txt            配布時の説明
   tools/build-ruby-engine.js   ruby-engine.js の作り直しスクリプト
@@ -36,7 +36,7 @@ testmaker/
 動作環境：Chrome / Edge。ダブルクリックで開く（file://）。サーバー不要。
 自動ルビの辞書は kuromoji.js（Apache-2.0）＋ mecab-ipadic。冒頭に権利表記あり。再配布時は丸ごと渡す。
 
-## 3. アーキテクチャ（TestMaker.html の中身）
+## 3. アーキテクチャ（index.html の中身）
 
 ファイル先頭のコメントに章立てがある。要点：
 
@@ -112,7 +112,7 @@ CSV（`正答CSV`）も出るが、構造を持てるのでJSONを正とする�
 
 ## 7. 制約・注意（壊さないために）
 
-- TestMaker.html は**外部ライブラリ・CDN・通信を使わない**方針。「10年後に担当が変わっても開ける」ことを優先している。
+- index.html は**外部ライブラリ・CDN・通信を使わない**方針。「10年後に担当が変わっても開ける」ことを優先している。
   ライブラリを足す場合は、この方針とのトレードオフを先にユーザーへ確認する。
 - 重い辞書は別ファイル（ruby-engine.js）に分離し、遅延読み込み。無くても動くこと。
 - 成績データ（個人情報）を問題作成側のバックアップに混ぜない。
@@ -131,7 +131,7 @@ CSV（`正答CSV`）も出るが、構造を持てるのでJSONを正とする�
 ## 9. 動作確認のしかた
 
 ```
-# Playwright（Chromium）で TestMaker.html を開き、関数を直接呼べる
+# Playwright（Chromium）で index.html を開き、関数を直接呼べる
 const j = await page.evaluate(() => buildKeyJSON(compile(cur()), cur()));
 ```
 `compile(cur())` の `warnings` が空であること、`answers.length` が問題数と一致することを見る。

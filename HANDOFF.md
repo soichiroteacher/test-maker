@@ -45,7 +45,7 @@
 3. **共通ルールに合わせる**(`../CLAUDE.md`)
    - **(2026-10-30 済)「見本で試す」**:`startTrial`・`endTrial`。見本のテストだけの仮の `store` に切り替え、本当の `store` は `trial.store` に預ける。その間 `saveStore` は何も書かない(データファイル・localStorage・IndexedDB の画像)。「データ」の操作は `notInTrial` で止め、上の帯(`renderFileBar`)も出さない。データファイルを開くとき(`dfOpenHandle`・`openFileDialog`)は見本を終わらせる。見本で直してもデータが変わらず、終わると元に戻ることを確かめた。
    - **(2026-10-30 済)「はじめての方へ」**:画面の案内 `TOUR`(採点アプリと同じしくみ。`startTour`・`showTourStep`・`placeTour`)。はじめて開いたとき(`testmaker:tour-seen` が無く、まだ何も作っていない)は、保存先を決める画面を閉じたあとに自動で出る(`firstTour`)。最初の説明から「見本で試しながら見る」を選べる。**画面の部品を変えたら `TOUR` の `sel` と説明も直す。**
-   - 本体のファイル名:ほかのアプリは `index.html`。GitHub Pages で短いURLにしたいなら改名を検討する(改名すると自動保存の場所が変わるので、バックアップでの移し方を README に書く)。
+   - **(2026-11-04 済)本体のファイル名を `TestMaker.html` から `index.html` に変え、GitHub Pages を有効にした**(ユーザーの指示「作る　indexにかえて」)。公開ページ:https://soichiroteacher.github.io/test-maker/ 。`ruby-engine.js` は GitHub に上げていないので、公開ページでは自動ルビは使えない(手で付けるルビは使える)。ブラウザの控え(localStorage・IndexedDB)は、ファイル名ではなく開いた場所(file:// や https://〜)ごとなので、名前を変えても控えはそのまま使える。データファイルの場所もそのまま。
 4. **実物での確認**:Word 出力を実際の Word と教科書体のフォントで開いて、見た目を確かめる。
    - 2026-10-29:このPCの Word 16 で、見本のテスト(教科書体・図あり)を開いて PDF にし、崩れていないことを確かめた(方法は「動作の確かめ方」)。学校のPCの Word でも一度確かめるとよい。
 5. **【ユーザーの要望・次に作る】大問の本文に画像(図)を載せる**(2026-10-29 に依頼。同じ日に設計をユーザーと決めた)
@@ -64,7 +64,7 @@
      6. `SCHEMA` を 2 に上げ、`migrate()` で `figures: []` などを補う。**採点用JSONは変わらない**(採点アプリは直さなくてよい)。
      7. 画面・印刷:図はページの途中で切らない(`break-inside: avoid`)。見出しは図の下。Word:`word/media/` に画像を入れ、行内の図(`wp:inline`)で載せる。「右」は枠線なしの2列の表で作る(浮かせる図はWordとLibreOfficeでずれやすいので使わない)。図と見出しは同じページに(`keepNext`)。
    - 作る順番:①画像(データの持ち方・画面・印刷)→ ②Word → ③コードの欄 → ④選択問題の1問ごとの図 → ⑤選択肢の図。
-   - **①は 2026-10-29 にできた**(`TestMaker.html` の「画像(図)」の節・`figPanel`・`figHTML`、compile の図の番号):
+   - **①は 2026-10-29 にできた**(`index.html` の「画像(図)」の節・`figPanel`・`figHTML`、compile の図の番号):
      - `SCHEMA` 2。大問に `figures`・`figPos`。画像は `store.images`(id は中身から作る `imgId`)。見本のテストの図は `BUILTIN_IMAGES`(store には入れない)。
      - 〔図:見出し〕(コロンは全角も可)は compile の最初に数えた番号で置き換える(`FIG_REF_RE`・`fr`)。見出しの重複・見つからない参照・画像のない図は警告に出る。
      - 画面では blob URL(`imgURL`)で表示する。localStorage の控えには画像を入れず、IndexedDB の `images` に控える。データファイル・バックアップには入れる(バックアップは使っている画像だけ)。
@@ -154,7 +154,7 @@
      → 実際の Word で開いて、画面と見比べながら直す(今は LibreOffice でしか確かめていない。4番と同じ)。
 7. **(2026-10-29 済)データをフォルダ内のファイルに保存する**
    - ユーザーの言葉:「現在、ブラウザのアカウントによって同じアプリを開いてもデータが異なります。混乱のもとになるので、毎回データファイルを同じフォルダ内に書き出す形で変更してください(バックアップと統一する形?)」
-   - 作ったもの(`TestMaker.html` の「データファイル(.json)への自動保存」の節。関数名は `df〜`):
+   - 作ったもの(`index.html` の「データファイル(.json)への自動保存」の節。関数名は `df〜`):
      - 先生が選んだ `テスト問題メーカー_データ.json` に、変更のたびに上書き保存する(File System Access API)。中身はバックアップと同じ形に、履歴(`snaps`)などを足したもの(`kind: "data"`)。「読み込み」でも開ける。
      - 選んだファイルの目印(FileSystemFileHandle)は IndexedDB(DB名 `testmaker`、`kv` の `dataFile`)に覚える。開き直して許可が切れていたら、起動時の画面で「データファイルを開く」を押してもらう(許可を求めるにはボタン操作が要る)。
      - 書く前にファイルの更新日時を見て、前回読み書きしたときと違えば上書きせず `conflict` にする(2つの画面・PCで同時に直したときにデータを消さないため)。
@@ -185,12 +185,12 @@
 
 ## 作りと方針
 
-- `TestMaker.html` の1ファイルで動く。外部ライブラリ・外部通信は使わない(10年後も動くことを優先)。Word 出力も自前で ZIP と XML を組み立てている。
+- `index.html` の1ファイルで動く。外部ライブラリ・外部通信は使わない(10年後も動くことを優先)。Word 出力も自前で ZIP と XML を組み立てている。
 - 入力データ(JSON)が唯一の正。番号・記号・正答は保存せず、毎回 `compile(exam)` で計算する。出力(画面・印刷・Word・CSV・採点用JSON)はすべて `compile` の結果だけを見る。
 - データの形を変えたら `SCHEMA` を上げ、`migrate()` で古いデータを補う(古いバックアップも開けるように)。
 - 印刷は白黒が前提(灰色の塗りは使わない)。ルビ付きでも行間がつぶれないこと。
 - 外国籍の生徒が多いので、問題用紙の漢字にはすべてルビを振る運用。教科書体のフォントを使う。
-- コードの章立て(1 定数 → 2 データの形 → 3 compile → 4 出力 → 5 保存 → 6 画面)は、`TestMaker.html` の先頭のコメントにある。
+- コードの章立て(1 定数 → 2 データの形 → 3 compile → 4 出力 → 5 保存 → 6 画面)は、`index.html` の先頭のコメントにある。
 
 ## 動作の確かめ方
 
@@ -198,7 +198,7 @@
   例:`compile(cur()).warnings` が空、`buildKeyJSON(compile(cur()), cur())` の `items.length` が問題数と一致すること。
 - 採点アプリとの連携は、出した採点用JSONを採点アプリで読み込み、正答・配点・満点が合うかを見る。
 - Word 出力を実物の Word で見る方法(2026-10-29 に使った。開発用のPCに Word が入っているとき):
-  1. `TestMaker.html` の写しの末尾に、テスト用の `<script>`(テストを組み立てて `buildDocx` を呼び、結果を base64 で画面に書く)を足す。
+  1. `index.html` の写しの末尾に、テスト用の `<script>`(テストを組み立てて `buildDocx` を呼び、結果を base64 で画面に書く)を足す。
   2. Chrome を `--headless=new --user-data-dir=<空のフォルダ> --virtual-time-budget=15000 --dump-dom` で開き、出てきた base64 を .docx に戻す。
   3. PowerShell で Word を開いて PDF にする(`New-Object -ComObject Word.Application` → `Documents.Open` → `SaveAs2(<pdf>, 17)`)。
   4. PDF を画像にして見る(Windows の `Windows.Data.Pdf` の `RenderToStreamAsync` で PNG にできる)。
