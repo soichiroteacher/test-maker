@@ -172,6 +172,24 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .figed input.grow{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px}
 .card input.w5,.sub input.w5,.figed input.w5{width:4.5em;border:1px solid var(--line);border-radius:6px;padding:2px 4px}
 .addbar{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0 40px}
+/* 大問の目次(2026-11-04)：編集欄の上に固定。押した大問(または基本設定)だけを下に出す */
+.secnav{position:sticky;top:0;z-index:5;background:var(--bg);display:flex;flex-wrap:wrap;gap:5px;padding:4px 0 8px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+.secnav .nv{border:1px solid var(--line);background:#fff;border-radius:8px;padding:4px 8px;font-size:14px;cursor:pointer;max-width:10em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.secnav .nv b{margin-right:4px}
+.secnav .nv.on{background:#1f2933;color:#fff;border-color:#1f2933}
+.secnav .nv.drag{opacity:.4}
+.secnav .nv.over{outline:2px dashed var(--accent);outline-offset:1px}
+.secnav .nv.help{margin-left:auto;color:var(--sub)}
+.secnav .nv.help.on{background:#e8eef7;color:#264b87;border-color:#9fb4d6}
+/* 説明(灰色の字)は「？ 説明を出す」を押したときだけ出す */
+.editor:not(.show-hints) div.hint{display:none}
+/* 入力欄：字を少し大きく。高さは入力に合わせて伸びる(autoSize) */
+.editor input[type=text],.editor input[type=number],.editor textarea,.editor select{font-size:16px}
+.editor textarea{overflow-y:hidden;min-height:3.4em}
+.editor textarea.codeta{overflow-y:auto}
+/* 右の用紙：いま左で開いている大問に印(画面だけ。印刷は #printRoot に写すので出ない)。大問を押すと左で開く */
+#sheetHost .sec{cursor:pointer}
+#sheetHost .sec.cur{outline:2px dashed #3a6fd8;outline-offset:2mm;border-radius:2px}
 
 /* ---- preview ---- */
 .preview{overflow:auto;background:#cfd6de;border-radius:12px;padding:12px;position:relative}
@@ -1076,7 +1094,7 @@ function renderPaperHTML(C, force) {
   if (m.intro.trim()) h += `<p class="p-intro">${escR(m.intro.trim())}</p>`;
 
   C.sections.forEach(sec => {
-    h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}${m.pageMode === 'keep' ? ' keep' : ''}">${headingHTML(sec, m)}`;
+    h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}${m.pageMode === 'keep' ? ' keep' : ''}" data-sid="${sec.id}">${headingHTML(sec, m)}`;
     if (sec.lead) h += `<p class="lead">${escR(sec.lead)}</p>`;
     sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
 
@@ -1908,7 +1926,15 @@ function bindText(obj, key, o = {}) {
   const e = h(tag, { type: tag === 'input' ? (o.type || 'text') : null, placeholder: o.ph, rows: o.rows, class: o.cls || '', min: o.min, max: o.max, step: o.step });
   e.value = obj[key] ?? '';
   e.addEventListener('input', () => { obj[key] = o.type === 'number' ? num(e.value, 0) : e.value; touch(); });
+  if (tag === 'textarea') e.addEventListener('input', () => autoSize(e));
   return e;
+}
+/* 入力欄(textarea)の高さを中身に合わせる。欄の中でスクロールしなくてよいように(2026-11-04。「枠が小さい」という声から) */
+function autoSize(e) {
+  if (!e.isConnected || e.classList.contains('codeta')) return;   // コードの欄は横に長いので、今までどおり手で広げる
+  const ed = $('#editor'), sc = ed.scrollTop;
+  e.style.height = 'auto'; e.style.height = (e.scrollHeight + 2) + 'px';
+  ed.scrollTop = sc;   // 高さを測り直すときに編集欄が上へ飛ばないように
 }
 function bindSelect(obj, key, opts, o = {}) {
   const e = h('select', {}, opts.map(([v, l]) => h('option', { value: v }, l)));
@@ -1924,7 +1950,8 @@ function bindCheck(obj, key, label) {
 const field = (label, input, hint) => h('label', { class: 'field' }, h('span', {}, label), input, hint ? h('div', { class: 'hint' }, hint) : null);
 
 /* ---- 基本設定 ---- */
-let ui = { settingsOpen: false, tab: 'paper' };
+// open：左で開いている大問の id か 'settings'(基本設定)。hints：説明(灰色の字)を出すか(このブラウザに覚える)
+let ui = { settingsOpen: false, tab: 'paper', open: null, hints: (() => { try { return localStorage.getItem('testmaker:hints') === '1'; } catch (e) { return false; } })() };
 function settingsCard(ex) {
   const m = ex.meta;
   const d = h('details', { class: 'card' }, h('summary', {}, '基本設定（タイトル・注意書き・体裁）'));
@@ -1986,13 +2013,12 @@ function sectionCard(s, i, ex) {
     h('span', { class: 'badge' }, '大問 ' + (i + 1)),
     bindText(s, 'title', { ph: '見出し（例：情報通信ネットワーク）', cls: 'grow' }),
     h('span', { class: 'tag' }, TYPE_NAMES[s.type]),
-    btn(s.collapsed ? '開く' : '閉じる', () => { s.collapsed = !s.collapsed; touch(); renderEditor(); }, '内容を折りたたむ'),
     btn('▲', () => { if (move(ex.sections, i, -1)) { touch(); renderEditor(); } }, '上へ'),
     btn('▼', () => { if (move(ex.sections, i, 1)) { touch(); renderEditor(); } }, '下へ'),
     h('div', { class: 'menu' }, h('button', { type: 'button', class: 'btn small', 'data-menu': true, title: '複製・削除' }, 'その他 ▾'),
       h('div', { class: 'menu-p right' },
-    h('button', { type: 'button', onclick: () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => { it.id = uid(); (it.figures || []).forEach(f => f.id = uid()); }); (c.figures || []).forEach(f => f.id = uid()); ex.sections.splice(i + 1, 0, c); touch(); renderEditor(); } }, 'この大問を複製する'),
-    h('button', { type: 'button', class: 'danger', onclick: () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); touch(); renderEditor(); } } }, 'この大問を削除する'))));
+    h('button', { type: 'button', onclick: () => { const c = clone(s); c.id = uid(); c.seed = Math.floor(Math.random() * 1e9); (c.items || []).forEach(it => { it.id = uid(); (it.figures || []).forEach(f => f.id = uid()); }); (c.figures || []).forEach(f => f.id = uid()); ex.sections.splice(i + 1, 0, c); ui.open = c.id; touch(); renderEditor(); } }, 'この大問を複製する'),
+    h('button', { type: 'button', class: 'danger', onclick: () => { if (confirm(`大問${i + 1}「${s.title || '無題'}」を削除しますか？\n（履歴に自動で残します）`)) { snapshot(true, '大問削除前'); ex.sections.splice(i, 1); ui.open = (ex.sections[i] || ex.sections[i - 1] || { id: 'settings' }).id; touch(); renderEditor(); } } }, 'この大問を削除する'))));
   card.append(head);
   // 画像は、この大問のどこで貼り付け(Ctrl+V)・ドラッグしても図として入る(Scratch の画面のスクリーンショットなど)
   card.addEventListener('paste', e => {
@@ -2002,7 +2028,6 @@ function sectionCard(s, i, ex) {
   card.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); card.classList.add('drop'); } });
   card.addEventListener('dragleave', e => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop'); });
   card.addEventListener('drop', e => { card.classList.remove('drop'); if (e.dataTransfer.files.length) { e.preventDefault(); addFigures(s, e.dataTransfer.files); } });
-  if (s.collapsed) return card;
 
   const lead = h('div', {}, field('指示文（この大問の見出しの下に表示。空なら非表示）', bindText(s, 'lead', { tag: 'textarea', rows: 2 })),
     h('label', { class: 'row', style: 'gap:6px;margin:2px 0 6px' }, h('span', { class: 'hint', style: 'margin:0' }, '観点（この大問）'), kantenSel(s, ex, false)),
@@ -2224,12 +2249,56 @@ function renderEditor() {
     ex.meta.showRuby ? chk('autoRuby', '漢字すべてに自動でルビ') : null,
     ex.meta.showRuby && ex.meta.autoRuby ? h('button', { type: 'button', class: 'btn small', onclick: openRubyDialog }, 'ルビの確認・辞書') : null,
     h('span', { class: 'hint', id: 'rubyStat', style: 'margin:0' }));
-  root.replaceChildren(tool, settingsCard(ex), ...ex.sections.map((s, i) => sectionCard(s, i, ex)),
+  // 開いているものがなくなっていたら(テストの切り替え・削除)、最初の大問(なければ基本設定)
+  if (ui.open !== 'settings' && !ex.sections.some(s => s.id === ui.open)) ui.open = ex.sections.length ? ex.sections[0].id : 'settings';
+  if (ui.open === 'settings') ui.settingsOpen = true;
+  const oi = ex.sections.findIndex(s => s.id === ui.open);
+  root.classList.toggle('show-hints', ui.hints);
+  root.replaceChildren(tool, secNav(ex),
+    ui.open === 'settings' ? settingsCard(ex) : sectionCard(ex.sections[oi], oi, ex),
     h('div', { class: 'addbar' }, h('b', {}, '大問を追加：'),
-      ...Object.entries(TYPE_NAMES).map(([t, n]) => h('button', { type: 'button', class: 'btn', onclick: () => { ex.sections.push(newSection(t)); touch(); renderEditor(); setTimeout(() => root.scrollTo({ top: root.scrollHeight, behavior: 'smooth' }), 30); } }, '＋ ' + n))));
+      ...Object.entries(TYPE_NAMES).map(([t, n]) => h('button', { type: 'button', class: 'btn', onclick: () => { const ns = newSection(t); ex.sections.push(ns); touch(); openSec(ns.id); } }, '＋ ' + n))));
+  root.querySelectorAll('textarea').forEach(autoSize);
   root.scrollTop = sc;
   setRubyStat();
   refresh();
+}
+
+/* 大問の目次：押すとその大問だけを開き、右の用紙もその大問の所へ動く。ドラッグで並べ替え。
+   (2026-11-04。前は全部の大問を縦に並べていて、見本でも編集欄が画面25枚分の長さになり、探しにくかった) */
+function secNav(ex) {
+  let dragFrom = -1;
+  const items = ex.sections.map((s, i) => {
+    const b = h('button', { type: 'button', class: 'nv' + (ui.open === s.id ? ' on' : ''), draggable: 'true', 'data-nav': s.id,
+      title: `大問${i + 1}「${s.title || '見出しなし'}」（${TYPE_NAMES[s.type]}）\nドラッグで順番を入れ替えられます`, onclick: () => openSec(s.id) },
+      h('b', {}, String(i + 1)), h('span', { class: 'nvt' }, s.title || TYPE_NAMES[s.type]));
+    b.addEventListener('dragstart', e => { dragFrom = i; b.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(i)); });
+    b.addEventListener('dragend', () => b.classList.remove('drag'));
+    b.addEventListener('dragover', e => { if (dragFrom < 0) return; e.preventDefault(); b.classList.add('over'); });
+    b.addEventListener('dragleave', () => b.classList.remove('over'));
+    b.addEventListener('drop', e => {
+      e.preventDefault(); b.classList.remove('over'); if (dragFrom < 0 || dragFrom === i) return;
+      const [x] = ex.sections.splice(dragFrom, 1); ex.sections.splice(i, 0, x); dragFrom = -1; touch(); renderEditor(); showInPreview();
+    });
+    return b;
+  });
+  const help = h('button', { type: 'button', class: 'nv help' + (ui.hints ? ' on' : ''), title: '入力欄の下の、灰色の説明を出す・しまう',
+    onclick: () => { ui.hints = !ui.hints; try { localStorage.setItem('testmaker:hints', ui.hints ? '1' : '0'); } catch (e) { } renderEditor(); } }, ui.hints ? '？ 説明をしまう' : '？ 説明を出す');
+  const setB = h('button', { type: 'button', class: 'nv' + (ui.open === 'settings' ? ' on' : ''), 'data-nav': 'settings', onclick: () => openSec('settings') }, '⚙ 基本設定');
+  return h('div', { class: 'secnav', id: 'secNav' }, setB, ...items, help);
+}
+/* 大問(または 'settings')を開く。fromPv = 右の用紙を押して開いたとき(用紙は動かさない) */
+function openSec(id, fromPv) {
+  ui.open = id; ui.followAt = fromPv ? 0 : Date.now(); renderEditor(); $('#editor').scrollTop = 0;
+  if (!fromPv) showInPreview();
+}
+/* 右の用紙を、左で開いている大問の所までスクロールする(基本設定なら用紙の上) */
+function showInPreview() {
+  const pv = $('#preview'); if (ui.pv === 'none' || ui.tab !== 'paper') return;
+  const el = ui.open === 'settings' ? null : $(`#sheetHost .sec[data-sid="${ui.open}"]`);
+  const tabs = $('#preview .ptabs'), over = (tabs ? tabs.offsetHeight : 0) + 24;   // 上に固定の「問題用紙／正答一覧」の帯に隠れないように
+  const top = el ? el.getBoundingClientRect().top - pv.getBoundingClientRect().top + pv.scrollTop - over : 0;
+  pv.scrollTo({ top: Math.max(0, top) });   // すぐに動かす(なめらかに動かすと、用紙の描き直しで止まることがあった)
 }
 
 /* ---- プレビュー・警告・状態表示 ---- */
@@ -2243,6 +2312,10 @@ function refresh() {
   // 字体の名前の " は ' にする(style="…" の中に " があると、そこで指定が切れて字体が効かなかった。2026-10-29 に直した)
   host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="${sheetStyle(ex.meta)}">${html}</div>`;
   fitPreview();
+  const cs = ui.open && ui.open !== 'settings' && host.querySelector(`.sec[data-sid="${ui.open}"]`); if (cs) cs.classList.add('cur');
+  // 開いた直後に用紙が描き直される(自動ルビの準備ができたときなど)と位置がずれるので、少しの間は合わせ直す
+  if (ui.followAt && Date.now() - ui.followAt < 4000) showInPreview();
+  document.querySelectorAll('#secNav [data-nav]').forEach(b => { const s = ex.sections.find(x => x.id === b.dataset.nav); const t = b.querySelector('.nvt'); if (s && t) t.textContent = s.title || TYPE_NAMES[s.type]; });
   // 警告
   const w = $('#warns');
   w.innerHTML = C.warnings.length
@@ -2378,6 +2451,11 @@ function setupPreviewSize() {
   let v = 'big'; try { v = localStorage.getItem('testmaker:preview') || 'big'; } catch (e) { }
   document.querySelectorAll('#pvSeg [data-pv]').forEach(btn => btn.onclick = () => setPreviewSize(btn.dataset.pv));
   $('#warnBadge').onclick = () => setPreviewSize('small');
+  // 右の用紙の大問を押すと、左でその大問を開く(文字を選んでいるときは開かない)
+  $('#sheetHost').addEventListener('click', e => {
+    const sec = e.target.closest('.sec[data-sid]'); if (!sec || ui.tab !== 'paper' || String(getSelection()).length) return;
+    if (sec.dataset.sid !== ui.open) openSec(sec.dataset.sid, true);
+  });
   setPreviewSize(v, true);
 }
 function setPreviewSize(v, quiet) {
@@ -2427,8 +2505,9 @@ const TOUR = [
   { title: 'ようこそ', text: 'テストの問題用紙を作るアプリです。左で問題を入力すると、右に問題用紙がその場で出ます。番号・記号・正答は自動で付きます。<br>これから画面を順番に案内します（約2分）。' },
   { sel: '#examSel', up: '.grp', title: 'テストの切り替え', text: '作っているテストをここで選びます。「テスト ▾」から、新しいテストを作る・複製する（次の学期はここから）・名前を変える・削除するができます。' },
   { sel: '.edtool', title: 'ルビ', text: '入力欄で漢字を選んでから「選択した語句にルビを付ける」を押すと、読みを付けられます。「ルビを表示」を外すと、ルビのない用紙になります。' },
-  { sel: '#editor details.card', title: '基本設定', text: '開くと、タイトル・注意書き・名前の欄（学年を最初から入れられます）・字体・文字の大きさ・行間・余白・ページ数・観点などを決められます。' },
-  { sel: '#editor .sc-head', title: '大問', text: '大問ごとに、見出し・本文・問題を入力します。語群選択では、本文の語句を選んで「選択した語句を空欄にする」と空欄になります。▲▼で順番を入れ替え、「その他 ▾」で複製・削除ができます。' },
+  { sel: '#secNav', title: '大問の目次', text: '押した大問だけが下に開き、右の問題用紙もその大問の所へ動きます（点線の枠が、いま開いている大問）。右の問題用紙の大問を押しても、左でその大問が開きます。ドラッグで順番を入れ替えられます。<br>「？ 説明を出す」を押すと、入力欄の下に使い方の説明が出ます。' },
+  { sel: '#secNav [data-nav="settings"]', title: '基本設定', text: '押すと、タイトル・注意書き・名前の欄（学年を最初から入れられます）・字体・文字の大きさ・行間・余白・ページ数・観点などを決められます。' },
+  { sel: '#editor .sc-head', title: '大問', text: '大問ごとに、見出し・本文・問題を入力します。語群選択では、本文の語句を選んで「選択した語句を空欄にする」と空欄になります。入力欄は、書いた量に合わせて高さが伸びます。▲▼で順番を入れ替え、「その他 ▾」で複製・削除ができます。' },
   { sel: '#editor .addbar', title: '大問を追加', text: '語群選択・選択問題・正誤問題・記述問題の4つから選んで足します。図（画像）やプログラムの欄は、大問の中から入れられます。' },
   { sel: '#preview', title: '問題用紙の見本', text: '入力するたびに、ここに問題用紙が出ます。「正答一覧」に切り替えると、正答を確かめられます。正解を決めていないなど、<b>確認すること</b>があるときもここに出ます。' },
   { sel: '#pvSeg', title: 'プレビューの大きさ', text: '見本が大きくて入力しづらいときは「小」か「なし」にします。「なし」のときに確認することがあると、上に「⚠ 確認すること」が出ます。' },
@@ -2598,6 +2677,7 @@ function helpHTML() {
 <li>「使い方 ▾」→「見本で試す」で、見本のテストを自由に直してみられます。<b>見本で試している間は何も保存しません</b>（本当のデータはそのまま）。終わったら、上の青い帯の「見本を終わって元に戻る」を押します。見本の間は、バックアップなど「データ」の操作はできません。</li></ul>
 <h4>基本の流れ</h4>
 <ul><li>左で大問を作る（語群選択／選択問題／正誤／記述）。右にその場で用紙が出ます。</li>
+<li>左の上の<b>大問の目次</b>（「⚙ 基本設定」「1 …」「2 …」）を押すと、その大問だけが下に開き、右の問題用紙もその大問の所へ動きます（点線の枠が、いま開いている大問）。右の問題用紙の大問を押しても、左でその大問が開きます。目次をドラッグすると順番を入れ替えられます。入力欄は書いた量に合わせて高さが伸びます。入力欄の下の説明は「？ 説明を出す」で出せます。</li>
 <li>番号（１）（２）…・記号（ア）（イ）…・正答は<b>すべて自動</b>です。問題の順番を入れ替えても番号は付け直されます。</li>
 <li>右上の<b>「出力」</b>から：「印刷／PDF」→ そのまま印刷・PDF保存／「Word で出力」→ 細かい手直しをしたいとき／「採点用JSON」→ 採点アプリへ／「正答CSV」→ 正答の表。</li>
 <li>テストの新規・複製・名前・削除は「テスト」、バックアップ・読み込み・履歴・保存先は「データ」、画面の案内・見本・この説明は「使い方」にまとめてあります（未バックアップの変更があると「データ」が黄色になります）。</li>
