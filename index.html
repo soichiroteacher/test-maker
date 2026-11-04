@@ -233,12 +233,12 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .bank-g{display:grid;padding:1mm 2mm}
 .bank-g div{padding:.5mm 1mm;line-height:calc(1.5 * var(--ls,1))}
 .bank-g.sm{font-size:calc(var(--fs,11pt) - 1pt)}   /* 語群を詰める(bankSmall)：本文より1pt小さく */
-.lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
+.lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.2;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
 .q-t{text-indent:-3.9em;line-height:calc(1.55 * var(--ls,1))}
 .q-t .qn{display:inline-block;width:3.9em;white-space:nowrap;text-indent:0;font-weight:700}
 .q-c{display:grid;margin-top:.5mm}
-.q-c div{line-height:calc(1.5 * var(--ls,1));padding-right:2mm}
+.q-c div{line-height:calc(1.5 * var(--ls,1));padding:.5mm 2mm .5mm 0}   /* 上下のすき間：縦に並んだ記号の四角がつながらないように(2026-11-04。行間を詰めたらつながった) */
 .ansbox{border:1px solid #000;margin:1mm 0 0;background:#fff}
 /* 図。ページの途中で切らない。白黒印刷が前提なので、色は「白黒にする」で画面でも灰色の濃さで確かめられる */
 .figs{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:2mm 3mm;margin:2mm 0}
