@@ -223,22 +223,22 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .sec h2{display:flex;align-items:center;gap:3mm;margin:0 0 2mm;padding-bottom:1mm;border-bottom:2px solid #000;font-size:1.15em;line-height:1.5;break-after:avoid}
 .sec h2 .no{background:#000;color:#fff;border-radius:2px;min-width:1.7em;text-align:center;padding:0 .25em;font-weight:700}
 .sec h2 small{font-weight:400;font-size:.85em;margin-left:auto;white-space:nowrap}
-.lead{margin:0 0 1.5mm;text-indent:1em;line-height:calc(1.65 * var(--ls,1))}
+.lead{margin:0 0 1.5mm;text-indent:1em;line-height:calc(1.5 * var(--ls,1))}
 .note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em;line-height:calc(1.6 * var(--ls,1))}
-.para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:calc(2 * var(--ls,1));orphans:2;widows:2}
+.para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:calc(1.8 * var(--ls,1));orphans:2;widows:2}   /* 空欄の四角が上下でぶつからない広さ(前は2倍) */
 .blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .1em;white-space:nowrap}
 .bank{border:1px solid #000;margin:2mm 0 1mm;break-inside:avoid}   /* 枠線は細め(2026-10-30。太くてきついという声から) */
 .bank-h{border-bottom:1px solid #000;padding:.2mm 3mm;font-size:.95em}
 .bank-h span{margin-left:1em;font-size:.9em}
 .bank-g{display:grid;padding:1mm 2mm}
-.bank-g div{padding:.5mm 1mm;line-height:calc(1.65 * var(--ls,1))}
+.bank-g div{padding:.5mm 1mm;line-height:calc(1.5 * var(--ls,1))}
 .bank-g.sm{font-size:calc(var(--fs,11pt) - 1pt)}   /* 語群を詰める(bankSmall)：本文より1pt小さく */
 .lab{display:inline-block;font-weight:700;border:1px solid #000;min-width:1.45em;text-align:center;line-height:1.3;margin-right:.35em;font-size:.95em}
 .q{margin:1.2mm 0;break-inside:avoid;padding-left:3.9em}
-.q-t{text-indent:-3.9em;line-height:calc(1.7 * var(--ls,1))}
+.q-t{text-indent:-3.9em;line-height:calc(1.55 * var(--ls,1))}
 .q-t .qn{display:inline-block;width:3.9em;white-space:nowrap;text-indent:0;font-weight:700}
 .q-c{display:grid;margin-top:.5mm}
-.q-c div{line-height:calc(1.6 * var(--ls,1));padding-right:2mm}
+.q-c div{line-height:calc(1.5 * var(--ls,1));padding-right:2mm}
 .ansbox{border:1px solid #000;margin:1mm 0 0;background:#fff}
 /* 図。ページの途中で切らない。白黒印刷が前提なので、色は「白黒にする」で画面でも灰色の濃さで確かめられる */
 .figs{display:flex;flex-wrap:wrap;justify-content:center;align-items:flex-end;gap:2mm 3mm;margin:2mm 0}
@@ -273,7 +273,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .sheet ruby rt{font-size:.55em;font-weight:400;line-height:1}
 /* ルビ付きの行は、ルビの分だけ高さが要る(Word も自動で行を高くする)。--rf より狭くはしない */
 .sheet.ruby-on{line-height:2.2;--rf:2}
-.ruby-on .para{line-height:max(calc(2 * var(--ls,1)), var(--rf))}
+.ruby-on .para{line-height:max(calc(2 * var(--ls,1)), var(--rf))}   /* ルビのときは前のまま(詰めない) */
 .ruby-on .p-title{line-height:2.1}
 .ruby-on .p-kind{line-height:1.9}
 .ruby-on .q-t,.ruby-on .q-c div,.ruby-on .bank-g div,.ruby-on .lead,.ruby-on .note,.ruby-on .p-notice,.ruby-on .p-intro{line-height:max(calc(1.7 * var(--ls,1)), var(--rf))}
@@ -460,7 +460,7 @@ const FIG_POS = { above: '本文の上', below: '本文の下', right: '本文�
 const KANTEN_MAX = 3;
 const kantenOk = (m, k) => Number.isInteger(k) && k >= 0 && k < KANTEN_MAX && !!String(m.kantenNames[k] || '').trim();
 const kantenAbbr = (m, k) => kantenOk(m, k) ? String(m.kantenNames[k]).trim().slice(0, 1) : '';   // 「知」「思」「主」(採点アプリの解答用紙と同じ)
-const LINE_SPACING = { tight: ['狭め', 0.88], normal: ['ふつう', 1], loose: ['広め', 1.15] };
+const LINE_SPACING = { xtight: ['もっと狭め', 0.8], tight: ['狭め', 0.88], normal: ['ふつう', 1], loose: ['広め', 1.15] };   // xtight は 2026-11-04 に追加(古い版で開くと「ふつう」になる)
 const MARGINS = { normal: ['ふつう', { t: 14, b: 16, x: 14 }], narrow: ['狭め', { t: 10, b: 13, x: 10 }] };   // mm(上・下・左右)
 const PAGE_MODES = { keep: '詰めるが、大問の途中ではページを変えない（入らない大問は次のページへ）', flow: '続けて詰める（大問の途中でもページが変わる）', section: '大問ごとに改ページ' };
 const lsOf = m => (LINE_SPACING[m.lineSpacing] || LINE_SPACING.normal)[1];
@@ -1394,10 +1394,12 @@ function buildDocx(C, imgs = new Map()) {
   C.sections.forEach(sec => {
     const s0 = body.length;
     const pt = pointsText(sec, m) ? [R('　' + pointsText(sec, m), { sz: sz - 3 })] : [];
+    // 行間(200 = 字の高さ1倍。画面の .para・.q-t・.q-c・.bank-g・.lead と同じ)。ルビのときは前の広さのまま
+    const LH = RUBY ? { para: 400, q: 340, ch: 320, bank: 330, lead: 330 } : { para: 360, q: 310, ch: 300, bank: 300, lead: 300 };
     const kR = it => itemKantenText(it, sec, m) ? [R('　' + itemKantenText(it, sec, m), { sz: sz - 3 })] : [];
     body.push(P([R(' ' + zen(sec.no) + ' ', { b: true, color: 'FFFFFF', shd: '000000', sz: sz + 2 }), RR('　' + sec.title, { b: true, sz: sz + 2 }), ...pt],
       { keepNext: true, underline: true, before: 240, after: 80, line: 320, pbb: m.pageMode === 'section' && sec.no > 1 }));
-    if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: 330, after: 40, keepNext: true }));
+    if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: LH.lead, after: 40, keepNext: true }));
     sec.notes.forEach(x => body.push(P(RR('※　' + x, { sz: sz - 1 }), { left: unit * 1.2, hanging: unit * 1.2, line: 320, after: 20, keepNext: true })));
 
     // 種類ごとの中身。main = 本文(段落・設問)、after = 語群。fw = 使える幅(twip)。図を「本文の右」に置くときは狭くなる
@@ -1406,14 +1408,14 @@ function buildDocx(C, imgs = new Map()) {
       if (sec.type === 'blank') {
         sec.paras.forEach((toks, i) => {
           const runs = toks.map(t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
-          main.push(P(runs, { first: unit, line: 400, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
+          main.push(P(runs, { first: unit, line: LH.para, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
         });
         const b = sec.bank, cols = b.cols, cw = Math.floor(fw / cols);
         const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? fw - cw * (cols - 1) : cw);
         const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
         const lines = chunk(b.items, cols);
         lines.forEach((ln, ri) => {
-          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, bsz), RR('　' + it.text, bsz)], { keepNext: ri < lines.length - 1, line: 330, before: 20, after: 20 }) }));
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, bsz), RR('　' + it.text, bsz)], { keepNext: ri < lines.length - 1, line: LH.bank, before: 20, after: 20 }) }));
           for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
           rows.push({ cells });
         });
@@ -1421,12 +1423,12 @@ function buildDocx(C, imgs = new Map()) {
       }
       else if (sec.type === 'choice') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
-          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: LH.q, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
           w => {
             const cols = it.cols, avail = w - IND, cw = Math.floor(avail / cols);
             const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
             const rows = chunk(it.choices, cols).map(ln => {
-              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: it.imgMode ? choiceImgXml(c, grid[ci] - 220, it.choiceH) : P([lab(c.label), RR('　' + c.text)], { line: 320 }) }));
+              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: it.imgMode ? choiceImgXml(c, grid[ci] - 220, it.choiceH) : P([lab(c.label), RR('　' + c.text)], { line: LH.ch }) }));
               for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
               return { cells };
             });
@@ -1435,14 +1437,14 @@ function buildDocx(C, imgs = new Map()) {
       }
       else if (sec.type === 'tf') {
         sec.items.forEach(it => main.push(itemXml(it, fw,
-          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: 340, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+          () => P([R('（' + it.n + '）', { b: true }), TAB, RR(it.text), ...kR(it)], { left: IND, hanging: IND, line: LH.q, before: 40, after: 40, keepNext: it.figs.length > 0, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
           () => '')));
       }
       else if (sec.type === 'written') {
         sec.items.forEach(it => {
           const ptx = writtenPtText(it, m) ? [R('　' + writtenPtText(it, m), { sz: sz - 3 })] : [];
           main.push(itemXml(it, fw,
-            () => P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: 340, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
+            () => P([R('（記' + it.k + '）', { b: true }), TAB, RR(it.text), ...ptx], { left: IND, hanging: IND, line: LH.q, before: 60, keepNext: true, tabs: `<w:tab w:val="left" w:pos="${IND}"/>` }),
             w => TBL([{ h: it.lines * 510, rule: 'exact', cells: [{ w: w - IND, xml: P('') }] }], [w - IND], { ind: IND - 110, grid: true }) + SPACER(80)));
         });
       }
@@ -2376,8 +2378,8 @@ function countPages(ex, over) {
   return pages;
 }
 /* 読みやすい順に試して、指定のページ数に入る最初の設定にする(字の大きさ → 行間 → 余白の順に詰める) */
-const FIT_ORDER = [[12, 'loose', 'normal'], [12, 'normal', 'normal'], [11, 'loose', 'normal'], [11, 'normal', 'normal'], [11, 'tight', 'normal'], [11, 'normal', 'narrow'], [11, 'tight', 'narrow'],
-  [10.5, 'normal', 'normal'], [10.5, 'tight', 'normal'], [10.5, 'tight', 'narrow'], [10, 'normal', 'normal'], [10, 'tight', 'normal'], [10, 'tight', 'narrow']];
+const FIT_ORDER = [[12, 'loose', 'normal'], [12, 'normal', 'normal'], [11, 'loose', 'normal'], [11, 'normal', 'normal'], [11, 'tight', 'normal'], [11, 'normal', 'narrow'], [11, 'tight', 'narrow'], [11, 'xtight', 'normal'], [11, 'xtight', 'narrow'],
+  [10.5, 'normal', 'normal'], [10.5, 'tight', 'normal'], [10.5, 'tight', 'narrow'], [10.5, 'xtight', 'narrow'], [10, 'normal', 'normal'], [10, 'tight', 'normal'], [10, 'tight', 'narrow'], [10, 'xtight', 'narrow']];   // もっと狭め(xtight)は、字を小さくする前に試す
 function fitToPages() {
   const ex = cur(), N = Math.max(1, Math.round(num(ex.meta.fitPages, 2)));
   // 本文の大きさ・行間・余白の1段ごとに、まずそのまま → 選択肢を横に並べる → 語群も詰める、の順に試す。
@@ -2688,9 +2690,9 @@ function helpHTML() {
 <li>語群は「正解の語句＋ダミー」から自動で作られます。ダミーは別の欄に1行ずつ。</li>
 <li>同じ空欄を文中でもう一度出すときは「同じ空欄をもう一度使う」（<code>{{@語句}}</code>）。</li></ul>
 <h4>体裁（行間・余白・改ページ・ページ数）</h4>
-<ul><li>「基本設定」で、文字の大きさ・行間（狭め／ふつう／広め）・余白（ふつう／狭め）を選べます。画面・印刷と Word は同じ行間・余白になります。</li>
+<ul><li>「基本設定」で、文字の大きさ・行間（もっと狭め／狭め／ふつう／広め）・余白（ふつう／狭め）を選べます。画面・印刷と Word は同じ行間・余白になります。ルビを付けるときは、ルビの分だけ行間が広くなります。</li>
 <li>改ページは、ふだんは「大問の途中ではページを変えない」です（入らない大問は次のページへ）。1ページに入らない大きな大問は、途中で分かれます。</li>
-<li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。本文の字を小さくする前に、まず「選択肢をなるべく横に並べる」「語群を詰める」を試します。</li>
+<li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。本文の字を小さくする前に、まず「選択肢をなるべく横に並べる」「語群を詰める」、行間の「もっと狭め」を試します。</li>
 <li><b>「語群を詰める」</b>は、語群の字を本文より1pt小さくし、列の数が「自動」なら入るだけ列を増やします（5列まで）。<b>「選択肢をなるべく横に並べる」</b>は、文字の選択肢を、幅に入るなら1行に、入らなければ3列・2列に並べます。どちらも「基本設定」で自分でオン・オフできます。</li>
 <li>「最後のページの下の文言」（著作権表示・無断転載禁止など）は、最後のページにだけ出ます。Word は最後のページの下、印刷／PDF は問題の最後のすぐ下です。</li>
 <li>「氏名欄の学年」に学年（例：1）を入れると、氏名欄の「年」の前に最初から入ります。空なら空欄です。</li></ul>
