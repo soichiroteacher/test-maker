@@ -226,7 +226,7 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .lead{margin:0 0 1.5mm;text-indent:1em;line-height:calc(1.5 * var(--ls,1))}
 .note{margin:0 0 1.5mm;font-size:.92em;padding-left:1.2em;text-indent:-1.2em;line-height:calc(1.6 * var(--ls,1))}
 .para{margin:0 0 1mm;text-indent:1em;text-align:justify;line-height:calc(1.8 * var(--ls,1));orphans:2;widows:2}   /* 空欄の四角が上下でぶつからない広さ(前は2倍) */
-.blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .1em;white-space:nowrap}
+.blank{font-weight:700;border:1.5px solid #000;padding:0 .15em;margin:0 .15em;white-space:nowrap}   /* 左右のすき間：空欄が続いても枠が離れて見えるように */
 .bank{border:1px solid #000;margin:2mm 0 1mm;break-inside:avoid}   /* 枠線は細め(2026-10-30。太くてきついという声から) */
 .bank-h{border-bottom:1px solid #000;padding:.2mm 3mm;font-size:.95em}
 .bank-h span{margin-left:1em;font-size:.9em}
@@ -1255,6 +1255,8 @@ function RR(t, o = {}) {                // ルビ対応の run 群。改行は W
     `<w:r><w:ruby><w:rubyPr><w:rubyAlign w:val="distributeSpace"/><w:hps w:val="${rs}"/><w:hpsRaise w:val="${base}"/><w:hpsBaseText w:val="${base}"/><w:lid w:val="ja-JP"/></w:rubyPr><w:rt>${R(g.r, { ...o, sz: rs, b: false })}</w:rt><w:rubyBase>${R(g.t, o)}</w:rubyBase></w:ruby></w:r>`).join('');
 }
 const TAB = '<w:r><w:tab/></w:r>';
+/* 空欄が続くとき(（１）（２）)は、間に半角の空白を入れる。Word は、枠の付いた字が隣り合うと1つの枠につなげてしまうため(2026-11-04) */
+const sepBlanks = (toks, run, o = {}) => toks.flatMap((t, i) => i && t.t !== 'text' && toks[i - 1].t !== 'text' ? [R(' ', o), run(t)] : [run(t)]);
 function P(runs, o = {}) {        // paragraph
   let p = '';
   if (o.keepNext) p += '<w:keepNext/>';
@@ -1357,7 +1359,7 @@ function buildDocx(C, imgs = new Map()) {
     const dg = String(cd.lines.length).length, cs = sz - 1;
     const ps = cd.lines.map((toks, i) => P([
       ...(cd.ln ? [R(String(i + 1).padStart(dg, ' ') + '  ', { font: CODE_FONT, sz: cs })] : []),
-      ...toks.map(t => t.t === 'text' ? R(t.v, { font: CODE_FONT, sz: cs }) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true, sz: cs }))],
+      ...sepBlanks(toks, t => t.t === 'text' ? R(t.v, { font: CODE_FONT, sz: cs }) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true, sz: cs }), { sz: cs })],
       { line: 300, keepNext: i < cd.lines.length - 1, keepLines: true }));
     return TBL([{ cells: [{ w: fw, xml: ps.join('') }] }], [fw], { grid: true, padV: 60, padH: 160 }) + SPACER(80);
   };
@@ -1446,7 +1448,7 @@ function buildDocx(C, imgs = new Map()) {
       const main = [], after = [];
       if (sec.type === 'blank') {
         sec.paras.forEach((toks, i) => {
-          const runs = toks.map(t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
+          const runs = sepBlanks(toks, t => t.t === 'text' ? RR(t.v) : R(`（${t.n == null ? '？' : t.n}）`, { b: true, bdr: true }));
           main.push(P(runs, { first: unit, line: LH.para, after: 40, keepNext: !!m.keepBank && i === sec.paras.length - 1 }));
         });
         const b = sec.bank, cols = b.cols, cw = Math.floor(fw / cols);
