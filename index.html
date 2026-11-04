@@ -280,16 +280,20 @@ textarea.codeta{width:100%;border:1px solid var(--line);border-radius:8px;paddin
 .edtool{position:sticky;top:0;z-index:2;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:2px 0 8px}
 .p-end{margin-top:6mm;text-align:center;font-size:.9em}
 /* answer key */
-.k-title{text-align:center;font-weight:700;font-size:1.5em;margin-bottom:1mm}
-.k-sub{text-align:center;margin-bottom:4mm;font-size:.95em}
-.k-sec{break-inside:avoid;margin-bottom:4mm}
-.k-sec h2{font-size:1em;margin:0 0 1mm;border-bottom:1.5px solid #000}
-.k-grid{columns:2;column-gap:8mm}
-.k-row{display:flex;gap:3mm;border-bottom:1px dotted #000;padding:.3mm 0;line-height:1.6;break-inside:avoid}
+.k-title{text-align:center;font-weight:700;font-size:1.4em;margin-bottom:.5mm;line-height:1.4}
+.k-sub{text-align:center;margin-bottom:3mm;font-size:.95em;line-height:1.4}
+.k-sec{break-inside:avoid;margin-bottom:2.5mm}
+.k-sec h2{font-size:1em;margin:0 0 .5mm;border-bottom:1.5px solid #000;line-height:1.5}
+.k-grid{columns:var(--kc,2);column-gap:6mm}
+.k-row{display:flex;gap:2mm;border-bottom:1px dotted #000;padding:.2mm 0;line-height:1.4;break-inside:avoid}
+.k-over{border:1.5px solid #000;padding:1.5mm 3mm;margin-bottom:3mm;font-size:.95em}
+@media print{.k-over{display:none}}
 .k-row .n{width:3em;font-weight:700;text-align:right}
 .k-row .a{width:2.2em;font-weight:700;text-align:center}
 .k-row .t{flex:1}
 .k-row .p{width:3em;text-align:right}
+.k-row .k{width:1.3em;text-align:center}
+.k-ksum{text-align:center;margin:-2mm 0 3mm;font-size:.95em;line-height:1.4}
 
 /* ---- dialogs / toast ---- */
 dialog{border:0;border-radius:14px;padding:0;max-width:min(760px,94vw);width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)}
@@ -554,11 +558,13 @@ function alignRuby(s, rd) {
   if (!m) return [{ t: s, r: rd }];
   let g = 1; return runs.map(x => KANJI_RE.test(x[0]) ? { t: x, r: m[g++] } : { t: x, r: null });
 }
+// 入力欄で改行した所は、用紙でも改行する(<br>。2026-11-04 に直した。前は改行が消えて1行につながっていた)
 function escR(s) {
-  if (!RUBY) return esc(plain(s));
-  return rubySegs(s).map(g => g.r ? `<ruby>${esc(g.t)}<rt>${esc(g.r)}</rt></ruby>` : esc(g.t)).join('');
+  if (!RUBY) return esc(plain(s)).replace(/\r?\n/g, '<br>');
+  return rubySegs(s).map(g => g.r ? `<ruby>${esc(g.t)}<rt>${esc(g.r)}</rt></ruby>` : esc(g.t)).join('').replace(/\r?\n/g, '<br>');
 }
 const escP = s => esc(plain(s));
+const paraLines = s => String(s || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);   // 指示文などを、改行ごとの段落に分ける(空の行は除く)
 const safeName = s => String(s||'test').replace(/[\\/:*?"<>|]/g,'_').slice(0,60);
 
 /* =====================================================================
@@ -1091,11 +1097,11 @@ function renderPaperHTML(C, force) {
   if (m.showName) h += `<div class="p-name"><span class="ln">${esc(String(m.grade ?? '').trim())}</span><span class="lb">年</span><span class="ln"></span><span class="lb">組</span><span class="ln"></span><span class="lb">番　名前</span><span class="ln w"></span></div>`;
   const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   if (nl.length) h += `<div class="p-notice">${nl.map(x => `<div>※　${escR(x)}</div>`).join('')}</div>`;
-  if (m.intro.trim()) h += `<p class="p-intro">${escR(m.intro.trim())}</p>`;
+  paraLines(m.intro).forEach(x => h += `<p class="p-intro">${escR(x)}</p>`);   // 改行ごとに段落(1字下げ)
 
   C.sections.forEach(sec => {
     h += `<section class="sec${m.pageMode === 'section' && sec.no > 1 ? ' pb' : ''}${m.pageMode === 'keep' ? ' keep' : ''}" data-sid="${sec.id}">${headingHTML(sec, m)}`;
-    if (sec.lead) h += `<p class="lead">${escR(sec.lead)}</p>`;
+    paraLines(sec.lead).forEach(x => h += `<p class="lead">${escR(x)}</p>`);
     sec.notes.forEach(x => h += `<p class="note">※　${escR(x)}</p>`);
 
     let main = '', after = '';     // main = 本文(段落・設問)、after = 語群。図は main の上・下・右に置く
@@ -1142,14 +1148,46 @@ function renderPaperHTML(C, force) {
   return h;
 }
 
-function renderKeyHTML(C) {
-  const m = C.meta; let h = `<div class="k-title">正答一覧</div><div class="k-sub">${escP(m.title)}　（マークシート ${C.answers.length}問 ／ 記述 ${C.written.length}問 ／ 合計 ${C.total}点）</div>`;
+/* 正答一覧は基本1ページに収める(2026-11-04。ユーザーの要望)。
+   字の大きさ(本文の大きさ〜8pt)と列の数(2・3)を、読みやすい順に試し、印刷の1ページの高さに入る最初のものにする。
+   高さは、印刷と同じ幅で見えない所に描いて測る(countPages と同じやり方)。どれでも入らないときは、いちばん低いものにして画面に知らせる */
+function keyFit(C) {
+  const m = C.meta, mg = mgOf(m), px = 96 / 25.4;
+  const ft = (m.footer || '').trim(), footH = ft ? 8 + 3.6 * Math.ceil(ft.length / 90) : 0;   // 下の欄(最後のページに出る)の高さの目安(mm)
+  const pageH = (297 - mg.t - mg.b - footH) * px;
+  const sizes = [...new Set([Math.min(num(m.size, 11), 11), 10.5, 10, 9.5, 9, 8.5, 8].filter(x => x <= Math.min(num(m.size, 11), 11)))];
+  const box = document.createElement('div');
+  box.style.cssText = 'position:absolute;left:-10000px;top:0;visibility:hidden';
+  document.body.append(box);
+  let best = null;
+  for (const fs of sizes) for (const kc of [2, 3]) {
+    const o = { fs, kc };
+    box.innerHTML = `<div class="sheet" style="${keyStyle(m, o)};padding:0 ${mg.x}mm;box-shadow:none">${renderKeyHTML(C)}</div>`;
+    o.h = box.firstChild.getBoundingClientRect().height;
+    if (o.h <= pageH) { box.remove(); return o; }
+    if (!best || o.h < best.h) best = o;
+  }
+  box.remove();
+  return Object.assign(best, { over: Math.ceil(best.h / pageH) });
+}
+const keyStyle = (m, o) => sheetStyle(m).replace(/--fs:[^;]*;/, `--fs:${o.fs}pt;`) + `;--kc:${o.kc}`;
+function renderKeyHTML(C, over) {
+  const m = C.meta; let h = over ? `<div class="k-over">⚠ 字を8ポイントまで小さくしても、1ページに収まりません（約${over}ページになります）。記述の模範解答を短くすると収まります。（この知らせは印刷されません）</div>` : '';
+  h += `<div class="k-title">正答一覧</div><div class="k-sub">${escP(m.title)}　（マークシート ${C.answers.length}問 ／ 記述 ${C.written.length}問 ／ 合計 ${C.total}点）</div>`;
+  const all = [...C.answers, ...C.written], useK = all.some(a => kantenOk(m, a.kanten));
+  if (useK) {
+    const sum = k => all.filter(a => a.kanten === k).reduce((t, a) => t + num(a.points, 0), 0), none = all.filter(a => !kantenOk(m, a.kanten));
+    const parts = m.kantenNames.map((n, k) => kantenOk(m, k) ? `${escP(String(n).trim())} ${sum(k)}点` : '').filter(Boolean);
+    if (none.length) parts.push(`観点なし ${none.reduce((t, a) => t + num(a.points, 0), 0)}点`);
+    h += `<div class="k-ksum">観点別：${parts.join(' ／ ')}</div>`;
+  }
+  const kS = a => useK ? `<span class="k">${kantenAbbr(m, a.kanten)}</span>` : '';
   C.sections.forEach(sec => {
     const rows = C.answers.filter(a => a.sec === sec.no);
     const wr = C.written.filter(a => a.sec === sec.no);
     h += `<div class="k-sec"><h2>${zen(sec.no)}　${escP(sec.title)}</h2><div class="k-grid">`;
-    rows.forEach(a => h += `<div class="k-row"><span class="n">${a.no}</span><span class="a">${escP(a.label)}</span><span class="t">${escP(a.text)}</span><span class="p">${a.points}点</span></div>`);
-    wr.forEach(a => h += `<div class="k-row"><span class="n">記${a.k}</span><span class="t">${escP(a.answer || '（模範解答なし）')}</span><span class="p">${a.points}点</span></div>`);
+    rows.forEach(a => h += `<div class="k-row"><span class="n">${a.no}</span><span class="a">${escP(a.label)}</span><span class="t">${escP(a.text)}</span>${kS(a)}<span class="p">${a.points}点</span></div>`);
+    wr.forEach(a => h += `<div class="k-row"><span class="n">記${a.k}</span><span class="t">${escP(a.answer || '（模範解答なし）')}</span>${kS(a)}<span class="p">${a.points}点</span></div>`);
     h += '</div></div>';
   });
   return h;
@@ -1209,7 +1247,8 @@ function R(t, o = {}) {           // run
   return `<w:r>${r ? `<w:rPr>${r}</w:rPr>` : ''}<w:t xml:space="preserve">${X(t)}</w:t></w:r>`;
 }
 let BASE_SZ = 22, LSK = 1;   // LSK = 行間の倍率(lsOf)
-function RR(t, o = {}) {                // ルビ対応の run 群
+function RR(t, o = {}) {                // ルビ対応の run 群。改行は Word でも行を変える(<w:br/>。段落の字下げはそのまま)
+  if (/\r?\n/.test(t)) return String(t).split(/\r?\n/).map(x => RR(x, o)).join('<w:r><w:br/></w:r>');
   if (!RUBY) return R(plain(t), o);
   const base = o.sz || BASE_SZ, rs = Math.max(9, Math.round(base * 0.55));
   return rubySegs(t).map(g => !g.r ? R(g.t, o) :
@@ -1381,7 +1420,7 @@ function buildDocx(C, imgs = new Map()) {
   }
   const nl = m.notice.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
   nl.forEach((x, i) => body.push(P(RR('※　' + x, { b: true, sz: sz - 1 }), { box: true, left: 120, right: 120, hanging: 0, line: 300, before: i === 0 ? 40 : 0, after: i === nl.length - 1 ? 120 : 0 })));
-  if (m.intro.trim()) body.push(P(RR(m.intro.trim()), { first: unit, line: 340, after: 60 }));
+  paraLines(m.intro).forEach((x, i, a) => body.push(P(RR(x), { first: unit, line: 340, after: i === a.length - 1 ? 60 : 0 })));
 
   // ---- 大問 ----
   // 「大問の途中で変えない」：大問の中のすべての段落に「次の段落と分離しない」「段落を分割しない」を付ける(最後の段落だけ外す)。
@@ -1399,7 +1438,7 @@ function buildDocx(C, imgs = new Map()) {
     const kR = it => itemKantenText(it, sec, m) ? [R('　' + itemKantenText(it, sec, m), { sz: sz - 3 })] : [];
     body.push(P([R(' ' + zen(sec.no) + ' ', { b: true, color: 'FFFFFF', shd: '000000', sz: sz + 2 }), RR('　' + sec.title, { b: true, sz: sz + 2 }), ...pt],
       { keepNext: true, underline: true, before: 240, after: 80, line: 320, pbb: m.pageMode === 'section' && sec.no > 1 }));
-    if (sec.lead) body.push(P(RR(sec.lead), { first: unit, line: LH.lead, after: 40, keepNext: true }));
+    paraLines(sec.lead).forEach((x, i, a) => body.push(P(RR(x), { first: unit, line: LH.lead, after: i === a.length - 1 ? 40 : 0, keepNext: true })));
     sec.notes.forEach(x => body.push(P(RR('※　' + x, { sz: sz - 1 }), { left: unit * 1.2, hanging: unit * 1.2, line: 320, after: 20, keepNext: true })));
 
     // 種類ごとの中身。main = 本文(段落・設問)、after = 語群。fw = 使える幅(twip)。図を「本文の右」に置くときは狭くなる
@@ -2310,9 +2349,10 @@ function refresh() {
   const ex = cur(); C = compile(ex);
   if (needEngine(ex) && engState === 'idle') ensureEngine();
   const host = $('#sheetHost');
-  const html = ui.tab === 'paper' ? renderPaperHTML(C) : renderKeyHTML(C);
+  const kf = ui.tab === 'key' ? keyFit(C) : null;   // 正答一覧は1ページに収まる字の大きさ・列の数にする
+  const html = ui.tab === 'paper' ? renderPaperHTML(C) : renderKeyHTML(C, kf.over);
   // 字体の名前の " は ' にする(style="…" の中に " があると、そこで指定が切れて字体が効かなかった。2026-10-29 に直した)
-  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="${sheetStyle(ex.meta)}">${html}</div>`;
+  host.innerHTML = `<div class="sheet${ex.meta.showRuby && ui.tab === 'paper' ? ' ruby-on' : ''}" style="${kf ? keyStyle(ex.meta, kf) : sheetStyle(ex.meta)}">${html}</div>`;
   fitPreview();
   const cs = ui.open && ui.open !== 'settings' && host.querySelector(`.sec[data-sid="${ui.open}"]`); if (cs) cs.classList.add('cur');
   // 開いた直後に用紙が描き直される(自動ルビの準備ができたときなど)と位置がずれるので、少しの間は合わせ直す
@@ -2682,6 +2722,8 @@ function helpHTML() {
 <li>左の上の<b>大問の目次</b>（「⚙ 基本設定」「1 …」「2 …」）を押すと、その大問だけが下に開き、右の問題用紙もその大問の所へ動きます（点線の枠が、いま開いている大問）。右の問題用紙の大問を押しても、左でその大問が開きます。目次をドラッグすると順番を入れ替えられます。入力欄は書いた量に合わせて高さが伸びます。入力欄の下の説明は「？ 説明を出す」で出せます。</li>
 <li>番号（１）（２）…・記号（ア）（イ）…・正答は<b>すべて自動</b>です。問題の順番を入れ替えても番号は付け直されます。</li>
 <li>右上の<b>「出力」</b>から：「印刷／PDF」→ そのまま印刷・PDF保存／「Word で出力」→ 細かい手直しをしたいとき／「採点用JSON」→ 採点アプリへ／「正答CSV」→ 正答の表。</li>
+<li><b>正答一覧</b>（右の「正答一覧」のタブ）は、ふつう1ページに収まるよう、字の大きさと列の数を自動で決めて印刷します。観点を使っているテストでは、1問ずつの観点と、観点ごとの点の合計も載ります。</li>
+<li>問題文の中で改行すると、問題用紙・Word でもそこで行が変わります。指示文は、改行ごとに1字下げた段落になります。</li>
 <li>テストの新規・複製・名前・削除は「テスト」、バックアップ・読み込み・履歴・保存先は「データ」、画面の案内・見本・この説明は「使い方」にまとめてあります（未バックアップの変更があると「データ」が黄色になります）。</li>
 <li>右のプレビュー（問題用紙の見本）は、上の「プレビュー　大・小・なし」で大きさを変えられます。編集に集中したいときは「小」か「なし」に。「なし」のときに確かめることがあると、上に「⚠ 確認すること」が出ます。</li>
 <li>画面の「確認してください」に出る警告（正解の未設定・選択肢数オーバーなど）を消してから出力します。</li></ul>
