@@ -1456,7 +1456,7 @@ function buildDocx(C, imgs = new Map()) {
         const rows = [{ cells: [{ w: fw, span: cols, bottom: true, xml: P([R('語群', { b: true, sz: sz - 1 }), ...(b.note ? [RR('　' + b.note, { sz: sz - 2 })] : [])], { keepNext: true, line: 290 }) }] }];
         const lines = chunk(b.items, cols);
         lines.forEach((ln, ri) => {
-          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, bsz), RR('　' + it.text, bsz)], { keepNext: ri < lines.length - 1, line: LH.bank, before: 20, after: 20 }) }));
+          const cells = ln.map((it, ci) => ({ w: grid[ci], xml: P([lab(it.label, bsz), R(' ', bsz), RR(it.text, bsz)], { keepNext: ri < lines.length - 1, line: LH.bank, before: 20, after: 20 }) }));
           for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('', { keepNext: ri < lines.length - 1 }) });
           rows.push({ cells });
         });
@@ -1469,11 +1469,12 @@ function buildDocx(C, imgs = new Map()) {
             const cols = it.cols, avail = w - IND, cw = Math.floor(avail / cols);
             const grid = Array.from({ length: cols }, (_, i) => i === cols - 1 ? avail - cw * (cols - 1) : cw);
             const rows = chunk(it.choices, cols).map(ln => {
-              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: it.imgMode ? choiceImgXml(c, grid[ci] - 220, it.choiceH) : P([lab(c.label), RR('　' + c.text)], { line: LH.ch }) }));
+              const cells = ln.map((c, ci) => ({ w: grid[ci], xml: it.imgMode ? choiceImgXml(c, grid[ci] - 220, it.choiceH) : P([lab(c.label), R(' '), RR(c.text)], { line: LH.ch }) }));
               for (let ci = ln.length; ci < cols; ci++) cells.push({ w: grid[ci], xml: P('') });
               return { cells };
             });
-            return TBL(rows, grid, { ind: IND - 110, padV: 10 }) + SPACER(60);
+            // 記号のあとは半角の空白、セルの左右の余白も細く(画面と同じ幅に入るように。2026-11-04。前は全角の空白と広い余白で、画面では1行の選択肢が Word では1字だけ次の行に出た)
+            return TBL(rows, grid, { ind: IND - 40, padH: 40, padV: 10 }) + SPACER(60);
           })));
       }
       else if (sec.type === 'tf') {
