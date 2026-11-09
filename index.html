@@ -137,6 +137,8 @@ select.examsel{max-width:260px;padding:6px 8px;border:1px solid var(--line);bord
 .editor{overflow:auto;padding-right:4px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
 .card h3{margin:0 0 8px;font-size:15px}
+.laybox{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:10px}   /* 体裁のまとまり(ルビ付き/なしで別) */
+.laybox h3{margin:2px 0 2px}
 .field{display:block;margin:8px 0}
 .field>span{display:block;font-size:12.5px;color:var(--sub);margin-bottom:2px}
 .field input[type=text],.field input[type=number],.field textarea,.field select,input.grow,textarea.grow{
@@ -427,7 +429,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 /* =====================================================================
    1. 定数・初期データ
    ===================================================================== */
-const SCHEMA = 11;                      // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
+const SCHEMA = 12;                      // データの形のバージョン。形を変えたら上げて migrate() に処理を書く
                                         // 2(2026-10-29): 大問に図(figures・figPos)を追加。画像の中身は store.images に1か所でまとめる
                                         // 3(2026-10-29): 大問にコードの欄(code・codePos・codeLines)を追加
                                         // 4(2026-10-29): 設問(選択・正誤・記述)にも図(figures・figPos)を追加
@@ -438,6 +440,7 @@ const SCHEMA = 11;                      // データの形のバージョン。�
                                         // 9(2026-10-30): 図に hideCap(見出しを用紙に出さない。番号「図１」だけ出す)
                                         // 10(2026-10-31): meta に grade(氏名欄の「年」に最初から入れる学年。空なら空欄)。古いデータは newMeta の '' になる
                                         // 11(2026-11-02): meta に bankSmall(語群の字を本文より1pt小さくし、列を増やす)・choiceWide(選択肢をなるべく横に並べる)。古いデータは false
+                                        // 12(2026-11-09): meta に otherLayout(ルビ付き／ルビなしのうち、今表示していないほうの体裁)。LAYOUT_KEYS を参照
 const LS_KEY = 'testmaker:v1';
 const LABEL_SETS = {
   kana: ['ア','イ','ウ','エ','オ','カ','キ','ク','ケ','コ','サ','シ','ス','セ','ソ','タ','チ','ツ','テ','ト'],
@@ -467,6 +470,21 @@ const kantenAbbr = (m, k) => kantenOk(m, k) ? String(m.kantenNames[k]).trim().sl
 const LINE_SPACING = { xtight: ['もっと狭め', 0.8], tight: ['狭め', 0.88], normal: ['ふつう', 1], loose: ['広め', 1.15] };   // xtight は 2026-11-04 に追加(古い版で開くと「ふつう」になる)
 const MARGINS = { normal: ['ふつう', { t: 14, b: 16, x: 14 }], narrow: ['狭め', { t: 10, b: 13, x: 10 }] };   // mm(上・下・左右)
 const PAGE_MODES = { keep: '詰めるが、大問の途中ではページを変えない（入らない大問は次のページへ）', flow: '続けて詰める（大問の途中でもページが変わる）', section: '大問ごとに改ページ' };
+/* 体裁は、ルビ付きとルビなしで別々に覚える(2026-11-09。ユーザーの要望)。
+   meta の size などには「今表示しているほう」の値が入り、もう一方は meta.otherLayout にしまっておく。
+   「ルビを表示」を切り替えたときに入れ替える(setRuby)。こうすると、体裁を読む所(画面・印刷・Word・ページ数)は今までどおり meta を見ればよい。
+   はじめてルビ付き(またはルビなし)にしたときは、標準の体裁(newMeta の値：11pt・行間ふつう・余白ふつう・大問の途中で改ページしない・語群を本文と同じページに)になる。
+   ルビなしを何ページかに詰めても、ルビ付きは詰まらず、問題と語群が同じページに収まりやすい */
+const LAYOUT_KEYS = ['size', 'lineSpacing', 'margin', 'bankCols', 'keepBank', 'bankSmall', 'choiceWide', 'pageMode', 'fitPages'];
+const pickLayout = m => Object.fromEntries(LAYOUT_KEYS.map(k => [k, m[k]]));
+const layoutDefault = () => pickLayout(newMeta());
+function setRuby(m, on) {
+  if (!!m.showRuby === !!on) return;
+  const saved = m.otherLayout;
+  m.otherLayout = pickLayout(m);
+  Object.assign(m, layoutDefault(), saved ? pickLayout(Object.assign(layoutDefault(), saved)) : {});
+  m.showRuby = !!on;
+}
 const lsOf = m => (LINE_SPACING[m.lineSpacing] || LINE_SPACING.normal)[1];
 const mgOf = m => (MARGINS[m.margin] || MARGINS.normal)[1];
 const CHOICE_COLS = { auto: '自動', 1: '1列', 2: '2列', 4: '4列' };
@@ -577,7 +595,7 @@ function newMeta() {
     intro: '各問題の指示にしたがって、解答用紙のマークシートの記号を塗りつぶしなさい。',
     showName: true, grade: '', bankSmall: false, choiceWide: false, font: FONTS[0][0], size: 11, labelSet: 'kana', bankCols: 0,
     showPoints: true, maxChoices: 10, showRuby: true, autoRuby: true, pageMode: 'keep', keepBank: true,
-    lineSpacing: 'normal', margin: 'normal', fitPages: 2,
+    lineSpacing: 'normal', margin: 'normal', fitPages: 2, otherLayout: null,   // otherLayout：今表示していないほう(ルビ付き/なし)の体裁。null は標準
     kantenNames: ['知識・技能', '思考・判断・表現', '主体的に学習に取り組む態度'], showKanten: true,
     footer: '本教材のすべての権利は作成者が保有しています。本教材の内容は無断で複製、配布、転載することを禁じます。'
   };
@@ -608,11 +626,16 @@ function newExam(name, meta) {
 }
 /* 古い形のデータを今の形へ。足りない項目を補うだけで、既存の値は消さない */
 function migrate(ex) {
+  const old = num(ex.schema, 1);
   ex.schema = SCHEMA;
   ex.id = ex.id || uid();
   ex.name = ex.name || '無題のテスト';
   ex.meta = Object.assign(newMeta(), ex.meta || {});
   ex.meta.kantenNames = Array.from({ length: KANTEN_MAX }, (_, k) => String((ex.meta.kantenNames || [])[k] ?? ''));
+  // schema 11 まで：体裁は1つだけだった。ルビ付きで開いているテストは、今までの体裁を「ルビなし」のほうへしまい、ルビ付きは標準の(見やすい)体裁にする
+  if (old < 12 && ex.meta.showRuby) { ex.meta.otherLayout = pickLayout(ex.meta); Object.assign(ex.meta, layoutDefault()); }
+  const ol = ex.meta.otherLayout;
+  ex.meta.otherLayout = ol && typeof ol === 'object' ? pickLayout(Object.assign(layoutDefault(), ol)) : null;
   ex.sections = (ex.sections || []).map(s => {
     const d = newSection(s.type in TYPE_NAMES ? s.type : 'blank');
     const m = Object.assign(d, s);
@@ -2008,13 +2031,7 @@ function settingsCard(ex) {
     field('全体の指示文（注意書きの下。空なら非表示）', bindText(m, 'intro', { tag: 'textarea', rows: 2 })),
     h('div', { class: 'row' },
       field('選択肢の記号', bindSelect(m, 'labelSet', Object.entries(LABEL_NAMES))),
-      field('文字の大きさ', bindSelect(m, 'size', [[10, '10pt'], [10.5, '10.5pt（小）'], [11, '11pt（標準）'], [12, '12pt（大）']], { numeric: true }))),
-    h('div', { class: 'row' },
-      field('行間', bindSelect(m, 'lineSpacing', Object.entries(LINE_SPACING).map(([k, v]) => [k, v[0]]))),
-      field('余白', bindSelect(m, 'margin', Object.entries(MARGINS).map(([k, v]) => [k, v[0]])))),
-    h('div', { class: 'row' },
-      field('フォント（Word出力で使用）', bindSelect(m, 'font', FONTS.map(f => [f[0], f[0]]))),
-      field('語群の列数', bindSelect(m, 'bankCols', [[0, '自動'], [2, '2列'], [3, '3列'], [4, '4列'], [5, '5列']], { numeric: true }))),
+      field('フォント（Word出力で使用）', bindSelect(m, 'font', FONTS.map(f => [f[0], f[0]])))),
     h('div', { class: 'row' },
       field('マークシートの最大選択肢数', bindText(m, 'maxChoices', { type: 'number', min: 2, max: 20 }), 'これを超えると警告します'),
       h('div', { style: 'flex:1' }, bindCheck(m, 'showName', '氏名欄を表示'),  bindCheck(m, 'showPoints', '配点を問題用紙に表示'))),
@@ -2022,6 +2039,25 @@ function settingsCard(ex) {
     h('div', { class: 'field' }, h('span', {}, '観点の名前（採点アプリと同じ3つまで。問題用紙には頭の1字が「知」「思」のように出ます）'),
       h('div', { class: 'row' }, ...m.kantenNames.map((_, k) => { const e = bindText(m.kantenNames, k, { cls: 'grow', ph: '観点' + (k + 1) }); e.addEventListener('change', renderEditor); return e; }))),
     bindCheck(m, 'showKanten', '観点を問題用紙に表示（配点の横に「2点×7問　計14点・知」のように）'),
+    field('最後のページの下の文言（著作権表示など）', bindText(m, 'footer')),
+    layoutBox(m)
+  );
+  return d;
+}
+/* 体裁(字の大きさ・行間・余白・改ページなど)。ルビ付きとルビなしで別々に覚える(setRuby を参照) */
+function layoutBox(m) {
+  const reset = () => {
+    if (!confirm(`${m.showRuby ? 'ルビ付き' : 'ルビなし'}の体裁を、標準（11pt・行間ふつう・余白ふつう・大問の途中で改ページしない）に戻しますか？`)) return;
+    Object.assign(m, layoutDefault()); AUTO_CACHE.clear(); touch(); renderEditor();
+  };
+  return h('div', { class: 'laybox' },
+    h('h3', {}, m.showRuby ? '体裁（ルビ付きのとき）' : '体裁（ルビなしのとき）'),
+    h('span', { class: 'hint', style: 'display:block' }, `ルビ付きとルビなしで、別々に覚えます。いまは${m.showRuby ? 'ルビ付き' : 'ルビなし'}の体裁です。上の「ルビを表示」を切り替えると、もう一方の体裁になります。`),
+    h('div', { class: 'row' },
+      field('文字の大きさ', bindSelect(m, 'size', [[10, '10pt'], [10.5, '10.5pt（小）'], [11, '11pt（標準）'], [12, '12pt（大）']], { numeric: true })),
+      field('行間', bindSelect(m, 'lineSpacing', Object.entries(LINE_SPACING).map(([k, v]) => [k, v[0]]))),
+      field('余白', bindSelect(m, 'margin', Object.entries(MARGINS).map(([k, v]) => [k, v[0]]))),
+      field('語群の列数', bindSelect(m, 'bankCols', [[0, '自動'], [2, '2列'], [3, '3列'], [4, '4列'], [5, '5列']], { numeric: true }))),
     bindCheck(m, 'keepBank', '語群を、本文の最後の数行と同じページに置く（語群だけ次のページに離れるのを防ぐ）'),
     bindCheck(m, 'bankSmall', '語群を詰める（語群の字を本文より1pt小さくし、列の数が「自動」なら列を増やす）'),
     bindCheck(m, 'choiceWide', '選択肢をなるべく横に並べる（幅に入るなら1行に、入らなければ3列・2列に）'),
@@ -2030,9 +2066,9 @@ function settingsCard(ex) {
       h('label', { class: 'row', style: 'gap:4px' }, bindText(m, 'fitPages', { type: 'number', min: 1, max: 20, cls: 'w5' }), 'ページ'),
       h('button', { type: 'button', class: 'btn small primary', onclick: fitToPages }, 'このページ数に収める'),
       h('span', { class: 'hint', style: 'margin:0' }, '文字の大きさ・行間・余白を自動で決めます（そのあと手で直せます）')),
-    field('最後のページの下の文言（著作権表示など）', bindText(m, 'footer'))
-  );
-  return d;
+    h('div', { class: 'row', style: 'margin-top:6px' },
+      h('button', { type: 'button', class: 'btn small', onclick: reset }, '標準の体裁に戻す'),
+      m.showRuby ? h('span', { class: 'hint', style: 'margin:0' }, '標準では、枚数が多くなっても、大問（問題と語群）をページの途中で分けません') : null));
 }
 
 /* 観点を選ぶ欄。item=true は設問用(「大問と同じ」を選べる。null で持つ) */
@@ -2286,7 +2322,7 @@ function addRuby() {
 function renderEditor() {
   const ex = cur(), root = $('#editor'), sc = root.scrollTop;
   const chk = (key, label, redraw) => { const c = h('input', { type: 'checkbox' }); c.checked = !!ex.meta[key];
-    c.addEventListener('change', () => { ex.meta[key] = c.checked; AUTO_CACHE.clear(); touch(); renderEditor(); }); return h('label', { class: 'row', style: 'gap:5px' }, c, label); };
+    c.addEventListener('change', () => { if (key === 'showRuby') setRuby(ex.meta, c.checked); else ex.meta[key] = c.checked; AUTO_CACHE.clear(); touch(); renderEditor(); }); return h('label', { class: 'row', style: 'gap:5px' }, c, label); };
   const tool = h('div', { class: 'edtool' },
     h('button', { type: 'button', class: 'btn small primary', onmousedown: e => e.preventDefault(), onclick: addRuby, title: '入力欄で漢字を選んでから押す' }, '選択した語句にルビを付ける'),
     chk('showRuby', 'ルビを表示'),
@@ -2479,7 +2515,7 @@ function doPrint() {
   const ft = esc(cur().meta.footer || '');
   const mg = mgOf(cur().meta); $('#printRoot').style.cssText = `--mx:${mg.x}mm;--mt:${mg.t}mm;--mb:${mg.b}mm`;
   $('#printRoot').innerHTML = `<table class="pt"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>${$('#sheetHost').innerHTML}${ft ? `<div class="pfoot">${ft}</div>` : ''}</td></tr></tbody></table>`;
-  const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' : '_正答一覧');
+  const old = document.title; document.title = safeName(cur().name) + (ui.tab === 'paper' ? '_問題用紙' + (cur().meta.showRuby ? '_ルビ付き' : '') : '_正答一覧');   // PDF に保存するときのファイル名になる
   window.print(); document.title = old;
 }
 /* メニュー：▾ のボタンで開き、外を押すか中のボタンを押すと閉じる。大問の「その他」も同じしくみ */
@@ -2549,7 +2585,7 @@ const TOUR_KEY = 'testmaker:tour-seen';
 const TOUR = [
   { title: 'ようこそ', text: 'テストの問題用紙を作るアプリです。左で問題を入力すると、右に問題用紙がその場で出ます。番号・記号・正答は自動で付きます。<br>これから画面を順番に案内します（約2分）。' },
   { sel: '#examSel', up: '.grp', title: 'テストの切り替え', text: '作っているテストをここで選びます。「テスト ▾」から、新しいテストを作る・複製する（次の学期はここから）・名前を変える・削除するができます。' },
-  { sel: '.edtool', title: 'ルビ', text: '入力欄で漢字を選んでから「選択した語句にルビを付ける」を押すと、読みを付けられます。「ルビを表示」を外すと、ルビのない用紙になります。' },
+  { sel: '.edtool', title: 'ルビ', text: '入力欄で漢字を選んでから「選択した語句にルビを付ける」を押すと、読みを付けられます。「ルビを表示」を外すと、ルビのない用紙になります。体裁（字の大きさ・行間など）は、ルビ付きとルビなしで別々に覚えます。' },
   { sel: '#secNav', title: '大問の目次', text: '押した大問だけが下に開き、右の問題用紙もその大問の所へ動きます（点線の枠が、いま開いている大問）。右の問題用紙の大問を押しても、左でその大問が開きます。ドラッグで順番を入れ替えられます。<br>「？ 説明を出す」を押すと、入力欄の下に使い方の説明が出ます。' },
   { sel: '#secNav [data-nav="settings"]', title: '基本設定', text: '押すと、タイトル・注意書き・名前の欄（学年を最初から入れられます）・字体・文字の大きさ・行間・余白・ページ数・観点などを決められます。' },
   { sel: '#editor .sc-head', title: '大問', text: '大問ごとに、見出し・本文・問題を入力します。語群選択では、本文の語句を選んで「選択した語句を空欄にする」と空欄になります。入力欄は、書いた量に合わせて高さが伸びます。▲▼で順番を入れ替え、「その他 ▾」で複製・削除ができます。' },
@@ -2685,7 +2721,7 @@ function setupButtons() {
   $('#bWord').onclick = () => withEngine(async () => {
     try {
       const C2 = compile(cur());
-      download(buildDocx(C2, await docxImages(C2)), `${safeName(cur().name)}_問題用紙.docx`); toast('Wordファイルを書き出しました');
+      download(buildDocx(C2, await docxImages(C2)), `${safeName(cur().name)}_問題用紙${cur().meta.showRuby ? '_ルビ付き' : ''}.docx`); toast('Wordファイルを書き出しました');
     } catch (e) { alert('Word出力に失敗しました: ' + e.message); }
   });
   $('#bPrint').onclick = () => withEngine(() => { refresh(); doPrint(); });
@@ -2736,6 +2772,7 @@ function helpHTML() {
 <li>同じ空欄を文中でもう一度出すときは「同じ空欄をもう一度使う」（<code>{{@語句}}</code>）。</li></ul>
 <h4>体裁（行間・余白・改ページ・ページ数）</h4>
 <ul><li>「基本設定」で、文字の大きさ・行間（もっと狭め／狭め／ふつう／広め）・余白（ふつう／狭め）を選べます。画面・印刷と Word は同じ行間・余白になります。ルビを付けるときは、ルビの分だけ行間が広くなります。</li>
+<li><b>体裁は、ルビ付きとルビなしで別々に覚えます。</b>「基本設定」の「体裁（ルビ付きのとき／ルビなしのとき）」の枠で直します。ルビなしを2ページに詰めても、「ルビを表示」にすると、ルビ付きの体裁（はじめは標準：11pt・行間ふつう・余白ふつう・大問の途中で改ページしない）になるので、枚数が増えても問題と語群が同じページに収まりやすくなります。「標準の体裁に戻す」で、いつでも標準に戻せます。</li>
 <li>改ページは、ふだんは「大問の途中ではページを変えない」です（入らない大問は次のページへ）。1ページに入らない大きな大問は、途中で分かれます。</li>
 <li>ページ数を入れて<b>「このページ数に収める」</b>を押すと、そのページ数に収まる中でいちばん読みやすい文字の大きさ・行間・余白にします。Word はページの分け方を Word が決めるので、1ページずれることがあります。本文の字を小さくする前に、まず「選択肢をなるべく横に並べる」「語群を詰める」、行間の「もっと狭め」を試します。</li>
 <li><b>「語群を詰める」</b>は、語群の字を本文より1pt小さくし、列の数が「自動」なら入るだけ列を増やします（5列まで）。<b>「選択肢をなるべく横に並べる」</b>は、文字の選択肢を、幅に入るなら1行に、入らなければ3列・2列に並べます。どちらも「基本設定」で自分でオン・オフできます。</li>
@@ -2761,7 +2798,7 @@ function helpHTML() {
 <li><b>種類を「ブロック」にすると、MakeCode のようなブロックの絵になります。</b>1行に1つのブロックを書き、中に入るブロックは空白2つ（Tab キー）で字下げします。<code>(100)</code> は丸い値の枠、<code>&lt;ボタンAが押されている&gt;</code> は六角形の条件の枠、「もし」と同じ字下げの「でなければ」は2段のブロックになります。<code>{{答え}}</code> の空欄とルビも使えます。比べる記号は ＞ ＜ ≧ など全角で書いてください（半角の &lt; &gt; は枠になります）。</li></ul>
 <h4>ルビ・フォント</h4>
 <ul><li>漢字を選んで「選択した語句にルビを付ける」→ 読みを入力。<code>[漢字|かんじ]</code> の形で保存されます。</li>
-<li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。</li>
+<li>「ルビを表示」のチェックで、同じデータからルビ付き版／なし版を切り替えられます。体裁（字の大きさ・行間など）は、それぞれ別に覚えます。ルビ付きで書き出したファイル（Word・PDF）の名前には「_ルビ付き」が付きます。</li>
 <li>「漢字すべてに自動でルビ」をオンにすると、手で付けていない漢字にも自動で読みが付きます（同じフォルダの <code>ruby-engine.js</code> が必要）。優先順位は ①手で付けたルビ ②登録した辞書 ③自動 です。</li>
 <li>自動の読みは完全ではありません（「行った」「進数」など）。出力前に「ルビの確認・辞書」で一覧を見て、直した読みは登録しておくと次回以降も使われます。辞書はバックアップにも入ります。</li>
 <li>フォントは基本設定で選びます。教科書体は「UD デジタル 教科書体」（Windows10以降に標準搭載）。入っていないパソコンではWord／印刷とも別の字体になります。</li></ul>
